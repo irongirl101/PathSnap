@@ -12,7 +12,7 @@ def test_map_match_accepts_ordered_gps_points():
             "trip_id": "trip-1",
             "points": [
                 {"lat": 12.97, "lon": 77.59},
-                {"lat": 12.98, "lon": 77.60},
+                {"lat": 12.98, "lon": 77.60, "timestamp_s": 2.0},
             ],
         }
     )

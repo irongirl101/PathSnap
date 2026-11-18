@@ -36,16 +36,22 @@
     <p class="intro">Submit an ordered GPS trace and inspect the predicted road arc sequence.</p>
     <div class="grid">
       <section class="card">
-        <h2>Trip input</h2>
-        <label for="tripId">Trip ID <span style="font-weight:400;color:#718096">(optional)</span></label>
-        <input id="tripId" placeholder="e.g. 00000042">
+        <h2>Evaluation trip</h2>
+        <label for="tripId">Select a server-side trip</label>
+        <select id="tripId" style="width:100%;border:1px solid var(--line);border-radius:9px;padding:10px 11px;color:var(--ink);background:#fff;font:inherit">
+          <option value="">Loading evaluation trips…</option>
+        </select>
+        <p class="hint">Only trip IDs are listed here. Ground-truth routes remain on the API laptop.</p>
+        <div class="actions"><button id="evalBtn">Run map matching and evaluation</button></div>
+        <details style="margin-top:18px">
+          <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Developer preview: submit a custom trace</summary>
         <label for="points">Ordered points (JSON)</label>
         <textarea id="points" spellcheck="false">[
-  {"lat": 12.9716, "lon": 77.5946, "timestamp": "2025-01-01T10:00:00Z"},
-  {"lat": 12.9721, "lon": 77.5952, "timestamp": "2025-01-01T10:00:05Z"}
+  {"lat": 56.251559, "lon": 54.963519, "timestamp_s": 1.0},
+  {"lat": 56.251523, "lon": 54.963143, "timestamp_s": 2.0}
 ]</textarea>
-        <div class="actions"><button id="matchBtn">Match route</button><button class="secondary" id="evalBtn">Evaluate held-out trips</button></div>
-        <p class="hint">The held-out route labels stay on the server. Evaluation uses the configured ten-trip manifest.</p>
+        <div class="actions"><button class="secondary" id="matchBtn">Match custom trace</button></div>
+        </details>
       </section>
       <section class="card">
         <h2>Trace and matched route</h2>
@@ -54,7 +60,7 @@
         <div id="result" aria-live="polite">Enter a trace and choose “Match route”.</div>
       </section>
     </div>
-    <section class="card evaluation"><h2>Server-side evaluation</h2><div id="metrics" class="hint">No evaluation has been run.</div></section>
+    <section class="card evaluation"><h2>Selected-trip results</h2><div id="metrics" class="hint">Choose a trip to run the complete pipeline.</div></section>
   </main>
   <script>
     const $ = id => document.getElementById(id);
@@ -77,10 +83,11 @@
       poly(raw,'#97a4b6',3); poly(matched,'#245eea',5);
       for(const p of raw){const [x,y]=xy(p);const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('cx',x);c.setAttribute('cy',y);c.setAttribute('r',4);c.setAttribute('fill','#6d7d93');svg.append(c);}
     }
-    async function checkHealth(){try{const r=await fetch('/healthz');const d=await r.json();$('healthDot').style.background=d.matcher_ready?'#22a06b':'#e4a11b';$('healthText').textContent=d.matcher_ready?'API ready':'API online · matcher not configured';}catch{$('healthText').textContent='API unavailable';$('healthDot').style.background='#dc4c4c';}}
+    async function checkHealth(){try{const r=await fetch('/healthz');const d=await r.json();$('healthDot').style.background=d.matcher_ready&&d.evaluator_ready?'#22a06b':'#e4a11b';$('healthText').textContent=d.matcher_ready&&d.evaluator_ready?`API ready · ${d.evaluation_trip_count} trips`: 'API online · pipeline setup needed';}catch{$('healthText').textContent='API unavailable';$('healthDot').style.background='#dc4c4c';}}
+    async function loadTrips(){const select=$('tripId');try{const r=await fetch('/api/v1/trips');if(!r.ok)throw new Error('Could not load evaluation trips');const d=await r.json();select.replaceChildren();if(!d.trips.length){select.add(new Option('No trips configured on API laptop',''));return;}select.add(new Option('Choose a trip…',''));for(const item of d.trips)select.add(new Option(item.trip_id,item.trip_id));}catch(e){select.replaceChildren(new Option(e.message,''));}}
     $('matchBtn').onclick=async()=>{const btn=$('matchBtn');try{const points=JSON.parse($('points').value);draw(points);btn.disabled=true;result.textContent='Matching…';const data=await api('/api/v1/map-match',{trip_id:$('tripId').value||null,points});draw(points,data.points||[]);result.textContent=`Matched ${data.route_arc_ids.length} arcs\n${JSON.stringify(data.route_arc_ids)}\n\n${JSON.stringify(data.metadata||{},null,2)}`;}catch(e){result.textContent=e.message;}finally{btn.disabled=false;}};
-    $('evalBtn').onclick=async()=>{const btn=$('evalBtn');btn.disabled=true;$('metrics').textContent='Running evaluation on the server…';try{const data=await api('/api/v1/evaluate',{});$('metrics').replaceChildren();const add=(label,value)=>{const box=document.createElement('div');box.className='metric';const b=document.createElement('b'),s=document.createElement('span');b.textContent=value??'—';s.textContent=label;box.append(b,s);$('metrics').append(box);};add('trips',data.evaluated_trips);for(const [k,v] of Object.entries(data.metrics||{}))add(k,v); }catch(e){$('metrics').textContent=e.message;}finally{btn.disabled=false;}};
-    checkHealth();
+    $('evalBtn').onclick=async()=>{const btn=$('evalBtn');if(!$('tripId').value){$('metrics').textContent='Select a trip first.';return;}btn.disabled=true;$('metrics').textContent='Running the selected trip on the API laptop…';try{const data=await api('/api/v1/evaluate',{trip_id:$('tripId').value});draw(data.trace||[],data.points||[]);$('result').textContent=`Trip ${data.trip_id}\nPredicted route (${data.route_arc_ids.length} arcs):\n${JSON.stringify(data.route_arc_ids)}\n\n${JSON.stringify(data.metadata||{},null,2)}`;$('metrics').replaceChildren();const add=(label,value)=>{const box=document.createElement('div');box.className='metric';const b=document.createElement('b'),s=document.createElement('span');b.textContent=value??'—';s.textContent=label;box.append(b,s);$('metrics').append(box);};for(const [k,v] of Object.entries(data.metrics||{}))add(k,v); }catch(e){$('metrics').textContent=e.message;}finally{btn.disabled=false;}};
+    checkHealth();loadTrips();
   </script>
 </body>
 </html>
