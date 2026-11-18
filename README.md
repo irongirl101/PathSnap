@@ -39,19 +39,15 @@ An arc ID belongs to one trip’s graph. When joining arcs to features or graph 
 
 The browser asks `GET /api/v1/trips` for the available trip IDs. When someone selects a trip, it sends that ID to `POST /api/v1/evaluate`. The API runs the matcher, compares its arc sequence with the reference route, and returns the prediction and metrics.
 
-The API loads the HMM matcher and route scorer from `src.pathsnap.api_adapter`. From the repository root, train all classifiers and the LambdaRank model, then save the ranker for API use with:
+The API loads the HMM matcher and route scorer from `src.pathsnap.api_adapter`. The training code compares classifiers and a LambdaRank candidate ranker using trip-grouped cross-validation. To evaluate the ranker and save a final model fitted on the training trips, run:
 
 ```bash
-python3 -m src.models.train_models \
-  --models logreg rf lgbm mlp svm lgbm_ranker \
-  --save-model artifacts/final_model.joblib \
-  --save-model-name lgbm_ranker \
-  --output-dir reports/all-models-run
+python -m src.models.train_models --models lgbm_ranker --save-model artifacts/final_model.joblib
 ```
 
-In PowerShell, use backticks for line continuation instead of backslashes. The script runs trip-grouped cross-validation, writes results into the selected output directory, and fits the requested final model on all selected training rows. The API accepts classifiers with `predict_proba` and rankers with `predict`; ranker scores are normalized per point for HMM emissions. Without `artifacts/final_model.joblib`, predictions use the geometric candidate baseline. The health endpoint reports whether a model was loaded.
+The adapter accepts either a classifier with `predict_proba` or a ranker with `predict`; ranker scores are normalized within each GPS point before they are used as HMM emissions. The current branch does not include a fitted model artifact, so predictions use the geometric candidate baseline until the training command is run. The health endpoint reports whether a model was loaded.
 
-The matcher receives a dictionary containing `trip_id`, ordered GPS points, nodes, and arcs, plus runtime state with the optional model artifact. It returns a stitched `route_arc_ids` sequence and per-observation matches for the map preview. The model-backed path uses the candidate feature generator and the loaded model’s probabilities or point-normalized ranking scores as HMM emissions. Override the default with `PATHSNAP_MATCHER=package.module:function` if the team changes the matcher adapter.
+The matcher receives a dictionary containing `trip_id`, ordered GPS points, nodes, and arcs, plus runtime state with the optional model artifact. It returns a stitched `route_arc_ids` sequence and per-observation matches for the map preview. The model-backed path uses the feature generator and the loaded model’s probabilities or point-normalized ranking scores as HMM emissions. Override the default with `PATHSNAP_MATCHER=package.module:function` if the team changes the matcher adapter.
 
 The scorer receives the trip ID, predicted arc IDs, reference arc IDs, trip graph/trace data, and per-observation predictions. It returns RMF, edge precision/recall/F1, point accuracy, and coverage. The matcher never receives the reference sequence. You can override the scorer with `PATHSNAP_EVALUATOR=package.module:function` if the evaluation implementation changes.
 

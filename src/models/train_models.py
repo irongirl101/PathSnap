@@ -1,6 +1,7 @@
-"""Compare candidate scorers with trip-grouped CV on data/processed/candidates.parquet.
+"""Compare candidate scorers with trip-grouped CV on candidates.parquet.
 
-usage: python -m src.models.train_models --models lgbm_ranker --save-model artifacts/final_model.joblib
+usage: python -m src.models.train_models --exclude 00000054 [--models lgbm_ranker]
+       [--save-model artifacts/final_model.joblib]
 Writes reports/results.csv (mean/std over folds), reports/results_per_fold.csv, reports/oof_predictions.parquet
 """
 import argparse, pathlib, time
@@ -51,14 +52,21 @@ def get_models():
 
 
 def top1(d, p):
-    """Share of points whose highest-scored candidate is the labelled arc."""
+    """Share of points with candidates whose top-ranked candidate is labelled."""
     t = d[["trip_id", "point_idx", "label"]].reset_index(drop=True).assign(p=np.asarray(p))
     best = t.loc[t.groupby(["trip_id", "point_idx"])["p"].idxmax()]
     return best["label"].mean()
 
 
+def top1_hits(d, p):
+    """Count points whose top-ranked candidate is labelled."""
+    t = d[["trip_id", "point_idx", "label"]].reset_index(drop=True).assign(p=np.asarray(p))
+    best = t.loc[t.groupby(["trip_id", "point_idx"])["p"].idxmax()]
+    return int(best["label"].sum())
+
+
 def point_softmax(d, scores):
-    """Convert ranker scores to probabilities independently for each GPS point."""
+    """Convert per-point ranking scores into candidate probabilities."""
     groups = [d["trip_id"], d["point_idx"]]
     score = pd.Series(np.asarray(scores), index=d.index)
     shifted = score - score.groupby(groups).transform("max")
@@ -73,44 +81,74 @@ def metrics(d, p):
                 log_loss=log_loss(y, p), brier=brier_score_loss(y, p), top1=top1(d, p))
 
 
-def load(path, exclude, frac):
+def load(path, exclude, frac, raw_root):
+    if not 0 < frac <= 1:
+        raise ValueError("frac must be greater than 0 and at most 1")
     df = pd.read_parquet(path)
     df["trip_id"] = df["trip_id"].astype(str)
     df = df[~df["trip_id"].isin(exclude)]
-    has_pos = df.groupby(["trip_id", "point_idx"])["label"].transform("max") == 1
-    df = df[has_pos]
-    if frac < 1:                                   # subsample whole points, keeping all their candidates
-        pts = df[["trip_id", "point_idx"]].drop_duplicates()
-        pts = pts[np.random.default_rng(SEED).random(len(pts)) < frac]
-        df = df.merge(pts, on=["trip_id", "point_idx"])
-    return df.reset_index(drop=True)
+    raw_root = pathlib.Path(raw_root)
+    if not raw_root.is_dir():
+        raise FileNotFoundError(f"Raw trip directory not found: {raw_root}")
+
+    point_counts, selected_points = {}, []
+    rng = np.random.default_rng(SEED)
+    for trip_dir in sorted(p for p in raw_root.iterdir() if p.is_dir()):
+        if trip_dir.name in exclude:
+            continue
+        track_path = trip_dir / f"{trip_dir.name}.track"
+        if not track_path.is_file():
+            raise FileNotFoundError(f"Track file not found: {track_path}")
+        with track_path.open() as track_file:
+            n_points = sum(1 for line in track_file if line.strip())
+        indices = np.arange(n_points)
+        if frac < 1:
+            indices = indices[rng.random(n_points) < frac]
+        point_counts[trip_dir.name] = len(indices)
+        if len(indices):
+            selected_points.append(pd.DataFrame({"trip_id": trip_dir.name, "point_idx": indices}))
+
+    if selected_points:
+        selected = pd.concat(selected_points, ignore_index=True)
+        df = df.merge(selected, on=["trip_id", "point_idx"], how="inner", validate="many_to_one")
+    else:
+        df = df.iloc[0:0]
+    if df.empty:
+        raise ValueError("No candidate rows remain after applying the raw-trip point selection")
+    return df.reset_index(drop=True), point_counts
 
 
-def main(path, exclude, frac, splits, names, output_dir="reports",
+def main(path, exclude, frac, splits, names, raw_root, output_dir="reports",
          save_model=None, save_model_name="lgbm_ranker"):
-    df = load(path, exclude, frac)
+    df, point_counts = load(path, exclude, frac, raw_root)
     print(f"trips {df.trip_id.nunique()} | points {df.groupby(['trip_id','point_idx']).ngroups} | "
-          f"rows {len(df)} | positive rate {df.label.mean():.3f}")
+          f"raw points {sum(point_counts.values())} | rows {len(df)} | positive rate {df.label.mean():.3f}")
     X, y, g = df[FEATURE_COLS], df["label"], df["trip_id"]
     folds = list(GroupKFold(splits).split(X, y, g))
+    fold_trip_ids = [set(df.iloc[va]["trip_id"].unique()) for _, va in folds]
+    for trip_id in set(point_counts) - set.union(*fold_trip_ids):
+        fold = min(
+            range(len(fold_trip_ids)),
+            key=lambda i: sum(point_counts[tid] for tid in fold_trip_ids[i]),
+        )
+        fold_trip_ids[fold].add(trip_id)
     models = {k: v for k, v in get_models().items() if k in names}
     rows, oof = [], {}
     for name, model in models.items():
         p = np.zeros(len(df)); cal = np.zeros(len(df))
         t0 = time.time()
-        for k, (tr, va) in enumerate(folds):
-            fitted = clone(model)
+        for tr, va in folds:
             if name == "lgbm_ranker":
                 train = df.iloc[tr].sort_values(["trip_id", "point_idx"], kind="mergesort")
-                fitted.fit(
+                model.fit(
                     train[FEATURE_COLS],
                     train["label"],
                     group=train.groupby(["trip_id", "point_idx"], sort=False).size().to_numpy(),
                 )
-                p[va] = fitted.predict(X.iloc[va])
+                p[va] = model.predict(X.iloc[va])
             else:
-                fitted.fit(X.iloc[tr], y.iloc[tr])
-                p[va] = fitted.predict_proba(X.iloc[va])[:, 1]
+                model.fit(X.iloc[tr], y.iloc[tr])
+                p[va] = model.predict_proba(X.iloc[va])[:, 1]
         fit_s = time.time() - t0
         if name == "lgbm_ranker":
             p = point_softmax(df, p)
@@ -118,10 +156,16 @@ def main(path, exclude, frac, splits, names, output_dir="reports",
             iso = IsotonicRegression(out_of_bounds="clip", y_min=EPS, y_max=1 - EPS).fit(p[tr], y.iloc[tr])
             cal[va] = iso.predict(p[va])
         for k, (tr, va) in enumerate(folds):
+            val_trip_ids = fold_trip_ids[k]
+            val_point_count = sum(point_counts[tid] for tid in val_trip_ids)
+            top1_correct = top1_hits(df.iloc[va], p[va])
+            top1_correct_cal = top1_hits(df.iloc[va], cal[va])
             m = metrics(df.iloc[va], p[va])
             m_cal = metrics(df.iloc[va], cal[va])
             rows.append(dict(model=name, fold=k, **m, log_loss_cal=m_cal["log_loss"],
-                             brier_cal=m_cal["brier"], top1_cal=m_cal["top1"]))
+                             brier_cal=m_cal["brier"], top1_cal=m_cal["top1"],
+                             top1_e2e=top1_correct / val_point_count,
+                             top1_e2e_cal=top1_correct_cal / val_point_count))
         oof[name], oof[name + "_cal"] = p, cal
         print(f"{name:7s} done in {fit_s:.0f}s")
     per_fold = pd.DataFrame(rows)
@@ -137,7 +181,7 @@ def main(path, exclude, frac, splits, names, output_dir="reports",
     print(show.to_string())
     if save_model:
         if save_model_name not in get_models():
-            raise ValueError(f"Cannot save model {save_model_name!r}; select it with --models")
+            raise ValueError(f"Cannot save unknown model: {save_model_name}")
         final_model = clone(get_models()[save_model_name])
         if save_model_name == "lgbm_ranker":
             training = df.sort_values(["trip_id", "point_idx"], kind="mergesort")
@@ -162,10 +206,11 @@ if __name__ == "__main__":
     ap.add_argument("--exclude", nargs="*", default=["00000054"])
     ap.add_argument("--frac", type=float, default=1.0, help="share of points to use (speeds up experiments)")
     ap.add_argument("--splits", type=int, default=5)
-    ap.add_argument("--models", nargs="*", default=["logreg", "rf", "lgbm", "mlp", "svm"])
+    ap.add_argument("--raw-root", default="data/raw/train", help="raw trip directory used for point counts")
+    ap.add_argument("--models", nargs="*", default=["logreg", "rf", "lgbm", "mlp", "svm", "lgbm_ranker"])
     ap.add_argument("--output-dir", default="reports", help="directory for CV results and OOF predictions")
-    ap.add_argument("--save-model", help="optional path to save a final model fitted on all selected data")
-    ap.add_argument("--save-model-name", default="lgbm_ranker", help="selected model to fit and save")
+    ap.add_argument("--save-model", help="optional path to save a final model fitted on all loaded trips")
+    ap.add_argument("--save-model-name", default="lgbm_ranker", help="model name to fit and save")
     a = ap.parse_args()
-    main(a.path, a.exclude, a.frac, a.splits, a.models, a.output_dir,
+    main(a.path, a.exclude, a.frac, a.splits, a.models, a.raw_root, a.output_dir,
          a.save_model, a.save_model_name)

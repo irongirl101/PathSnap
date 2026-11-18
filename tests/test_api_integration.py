@@ -72,7 +72,7 @@ def test_matcher_uses_loaded_classifier_for_candidate_emissions():
     assert result["route_arc_ids"] == [0, 1]
 
 
-def test_matcher_accepts_ranker_scores_for_candidate_emissions():
+def test_matcher_accepts_a_candidate_ranker_for_emissions():
     trip_data = {
         "trip_id": "demo",
         "points": [

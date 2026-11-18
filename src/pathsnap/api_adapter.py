@@ -226,9 +226,9 @@ def _classifier_candidates(
 def matcher(request_dict: dict[str, Any], runtime_dict: dict[str, Any]) -> dict[str, Any]:
     """Run candidate generation and HMM decoding for one trip.
 
-    When B's final artifact is present, use A's feature generator and B's
-    `predict_proba` scores as HMM emissions. Without that artifact, use C's
-    documented geometric candidate baseline so the API can still be exercised.
+    When a final artifact is present, use the feature generator and classifier
+    probabilities or per-point-normalized rank scores as HMM emissions. Without
+    that artifact, use the geometric candidate baseline.
     """
     trip_id = str(request_dict.get("trip_id") or "")
     if not trip_id:
