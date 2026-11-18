@@ -18,6 +18,9 @@ import random
 
 import numpy as np
 import yaml
+from scipy.optimize import minimize
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern, ConstantKernel as C
 
 from .config import MatchConfig, RoutingConfig, EmissionConfig, GapConfig, \
     StitchingConfig, load_config, save_config
@@ -362,3 +365,240 @@ def sensitivity_grid(
                 "n": len(mets),
             })
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Bayesian optimization (Gaussian Process + Expected Improvement)
+# ---------------------------------------------------------------------------
+
+def _make_config_from_params(
+    base_config: MatchConfig,
+    beta: float,
+    alpha: float,
+    representation: str = "stitched",
+) -> MatchConfig:
+    cfg = MatchConfig()
+    cfg.routing = RoutingConfig(
+        beta=float(beta),
+        max_route_distance_m=base_config.routing.max_route_distance_m,
+        directed=base_config.routing.directed,
+        plausibility_factor=base_config.routing.plausibility_factor,
+        min_route_gap_m=base_config.routing.min_route_gap_m,
+    )
+    cfg.emission = EmissionConfig(
+        alpha=float(alpha),
+        emission_floor=base_config.emission.emission_floor,
+        validate_nonnegative=base_config.emission.validate_nonnegative,
+    )
+    cfg.gap = base_config.gap
+    cfg.stitching = base_config.stitching
+    cfg.tie_break = base_config.tie_break
+    cfg.seed = base_config.seed
+    return cfg
+
+
+def bayesian_optimize_beta_alpha(
+    train_root: str,
+    train_ids: List[str],
+    val_ids: List[str],
+    n_iterations: int = 30,
+    n_initial_points: int = 8,
+    base_config: Optional[MatchConfig] = None,
+    representation: str = "stitched",
+    primary: str = "edge_f1",
+    seed: int = 42,
+) -> Dict:
+    """Bayesian optimization over (beta, alpha) using Gaussian Process +
+    Expected Improvement acquisition.
+
+    Beta and alpha are optimized in log-space. The same evaluation
+    implementation and trip-level split are used as grid search, so results
+    are directly comparable.
+
+    Parameters
+    ----------
+    train_root : str
+        Path to the training data root directory.
+    train_ids : list[str]
+        Training trip IDs (used for logging/diagnosis only; objective is
+        computed on val_ids).
+    val_ids : list[str]
+        Validation trip IDs. The objective (mean edge F1 over val trips) is
+        computed here.
+    n_iterations : int
+        Number of Bayesian optimization iterations after initial points.
+    n_initial_points : int
+        Number of initial random points before GP-based selection.
+    base_config : MatchConfig | None
+        Base configuration; if None, defaults are used.
+    representation : str
+        Route representation to evaluate ('stitched' or 'decoded').
+    primary : str
+        Primary metric for the objective ('edge_f1', 'rmf', etc.).
+    seed : int
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    dict
+        Best params, best score, optimization history, and comparison metadata.
+    """
+    if base_config is None:
+        base_config = MatchConfig()
+
+    rng = np.random.RandomState(seed)
+
+    # Pre-load trips + graphs for validation trips (same objects reused across
+    # all objective evaluations to avoid redundant I/O).
+    trips: Dict[str, Trip] = {}
+    graphs: Dict[str, Graph] = {}
+    for tid in val_ids:
+        td = trip_dir(train_root, tid)
+        trips[tid] = load_trip(tid, td)
+        graphs[tid] = build_graph(
+            trips[tid],
+            directed=base_config.routing.directed,
+            max_route_distance_m=base_config.routing.max_route_distance_m,
+        )
+
+    def objective_logspace(x: np.ndarray) -> float:
+        """Objective function in log-space: x = [log10(beta), log10(alpha)]."""
+        beta = 10.0 ** x[0]
+        alpha = 10.0 ** x[1]
+        cfg = _make_config_from_params(base_config, beta, alpha, representation)
+        mets: List[TripMetrics] = []
+        for tid in val_ids:
+            run = run_trip(trips[tid], graphs[tid], cfg, representation)
+            mets.append(run.hmm_metrics)
+        return objective_from_metrics(mets, primary)
+
+    # Bounds in log10 space
+    beta_log_bounds = (math.log10(10.0), math.log10(1000.0))   # beta in [10, 1000]
+    alpha_log_bounds = (math.log10(0.1), math.log10(5.0))      # alpha in [0.1, 5]
+
+    # Initial random design (uniform random in log-space)
+    n_init = n_initial_points
+    X_init = np.column_stack([
+        rng.uniform(beta_log_bounds[0], beta_log_bounds[1], n_init),
+        rng.uniform(alpha_log_bounds[0], alpha_log_bounds[1], n_init),
+    ])
+    y_init = np.array([objective_logspace(x) for x in X_init])
+
+    X = X_init.copy()
+    y = y_init.copy()
+
+    history: List[Dict] = []
+    for i in range(n_init):
+        history.append({
+            "iteration": i,
+            "phase": "initial",
+            "beta": float(10.0 ** X[i, 0]),
+            "alpha": float(10.0 ** X[i, 1]),
+            "val_score": float(y[i]),
+        })
+
+    # Gaussian Process surrogate
+    kernel = C(1.0, (1e-3, 1e3)) * Matern(length_scale=1.0, length_scale_bounds=(1e-2, 1e2), nu=2.5)
+    gp = GaussianProcessRegressor(
+        kernel=kernel,
+        alpha=1e-6,
+        normalize_y=True,
+        n_restarts_optimizer=5,
+        random_state=seed,
+    )
+
+    best_idx = int(np.argmax(y))
+    best_x = X[best_idx].copy()
+    best_y = float(y[best_idx])
+
+    for it in range(n_iterations):
+        # Fit GP
+        gp.fit(X, y)
+
+        # Expected Improvement acquisition
+        def negative_ei(x: np.ndarray) -> float:
+            x = x.reshape(1, -1)
+            mu, sigma = gp.predict(x, return_std=True)
+            sigma = np.maximum(sigma, 1e-9)
+            improvement = mu - best_y - 0.01  # small exploration constant
+            z = improvement / sigma
+            ei = improvement * _norm_cdf(z) + sigma * _norm_pdf(z)
+            return -float(ei[0])
+
+        # Optimize acquisition via multiple random restarts + L-BFGS-B
+        acquisition_bounds = [beta_log_bounds, alpha_log_bounds]
+        best_acq_x = None
+        best_acq_val = float("inf")
+        for _ in range(20):
+            x0 = np.array([
+                rng.uniform(beta_log_bounds[0], beta_log_bounds[1]),
+                rng.uniform(alpha_log_bounds[0], alpha_log_bounds[1]),
+            ])
+            res = minimize(
+                negative_ei, x0, method="L-BFGS-B", bounds=acquisition_bounds,
+            )
+            if res.fun < best_acq_val:
+                best_acq_val = res.fun
+                best_acq_x = res.x
+
+        if best_acq_x is None:
+            break
+
+        x_next = best_acq_x
+        y_next = objective_logspace(x_next)
+
+        X = np.vstack([X, x_next])
+        y = np.append(y, y_next)
+
+        if y_next > best_y:
+            best_y = float(y_next)
+            best_x = x_next.copy()
+
+        history.append({
+            "iteration": n_init + it,
+            "phase": "bayesian",
+            "beta": float(10.0 ** x_next[0]),
+            "alpha": float(10.0 ** x_next[1]),
+            "val_score": float(y_next),
+        })
+
+    best_beta = float(10.0 ** best_x[0])
+    best_alpha = float(10.0 ** best_x[1])
+
+    # Evaluate best on training trips for diagnosis
+    train_mets: List[TripMetrics] = []
+    for tid in train_ids:
+        td = trip_dir(train_root, tid)
+        trip = load_trip(tid, td)
+        graph = build_graph(
+            trip,
+            directed=base_config.routing.directed,
+            max_route_distance_m=base_config.routing.max_route_distance_m,
+        )
+        cfg = _make_config_from_params(base_config, best_beta, best_alpha, representation)
+        run = run_trip(trip, graph, cfg, representation)
+        train_mets.append(run.hmm_metrics)
+    train_score = objective_from_metrics(train_mets, primary)
+
+    return {
+        "method": "bayesian_optimization",
+        "best_params": {"beta": best_beta, "alpha": best_alpha},
+        "best_score": best_y,
+        "train_score": train_score,
+        "objective": primary,
+        "train_ids": train_ids,
+        "val_ids": val_ids,
+        "seed": seed,
+        "n_iterations": n_iterations,
+        "n_initial_points": n_initial_points,
+        "representation": representation,
+        "history": history,
+    }
+
+
+def _norm_cdf(z: np.ndarray) -> np.ndarray:
+    return 0.5 * (1.0 + np.vectorize(lambda v: math.erf(v / math.sqrt(2.0)))(z))
+
+
+def _norm_pdf(z: np.ndarray) -> np.ndarray:
+    return np.exp(-0.5 * z ** 2) / math.sqrt(2.0 * math.pi)
