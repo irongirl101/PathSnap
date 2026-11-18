@@ -16,7 +16,7 @@ class GPSPoint(BaseModel):
 class MapMatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    trip_id: str | None = Field(default=None, max_length=128)
+    trip_id: str = Field(min_length=1, max_length=128)
     points: list[GPSPoint] = Field(min_length=2, max_length=100_000)
 
 
