@@ -446,8 +446,8 @@ def _stitch_route(
     # Determine segment membership per point for stitching decisions.
     # We'll stitch decoder edges within a segment, and bridge across gaps/breaks.
     seg_of_point: Dict[int, int] = {}
-    for s_idx, (s, e, _) in enumerate(segments):
-        for p in range(s, e + 1):
+    for s_idx, seg in enumerate(segments):
+        for p in range(seg.start_point_idx, seg.end_point_idx + 1):
             seg_of_point[p] = s_idx
 
     for pidx in range(len(points)):
