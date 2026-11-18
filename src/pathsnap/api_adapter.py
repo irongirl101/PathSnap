@@ -178,13 +178,22 @@ def _classifier_candidates(
         return result
 
     candidates = add_features(network, track_xy, candidates)
-    if not hasattr(classifier, "predict_proba"):
-        raise TypeError("Loaded final model must provide predict_proba()")
-    class_ids = list(getattr(classifier, "classes_", [0, 1]))
-    if 1 not in class_ids:
-        raise ValueError("Loaded final model has no positive candidate class (label 1)")
-    positive_col = class_ids.index(1)
-    probabilities = classifier.predict_proba(candidates[FEATURE_COLS])[:, positive_col]
+    feature_rows = candidates[FEATURE_COLS]
+    if callable(getattr(classifier, "predict_proba", None)):
+        class_ids = list(getattr(classifier, "classes_", [0, 1]))
+        if 1 not in class_ids:
+            raise ValueError("Loaded final model has no positive candidate class (label 1)")
+        positive_col = class_ids.index(1)
+        probabilities = classifier.predict_proba(feature_rows)[:, positive_col]
+    elif callable(getattr(classifier, "predict", None)):
+        scores = pd.Series(classifier.predict(feature_rows), index=candidates.index)
+        shifted = scores - scores.groupby(candidates["pos"]).transform("max")
+        exp_scores = np.exp(shifted)
+        probabilities = (
+            exp_scores / exp_scores.groupby(candidates["pos"]).transform("sum")
+        ).to_numpy()
+    else:
+        raise TypeError("Loaded final model must provide predict_proba() or predict()")
 
     for row, probability in zip(candidates.to_dict("records"), probabilities):
         pos = int(row["pos"])

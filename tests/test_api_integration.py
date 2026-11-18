@@ -72,6 +72,35 @@ def test_matcher_uses_loaded_classifier_for_candidate_emissions():
     assert result["route_arc_ids"] == [0, 1]
 
 
+def test_matcher_accepts_ranker_scores_for_candidate_emissions():
+    trip_data = {
+        "trip_id": "demo",
+        "points": [
+            {"lat": 56.0, "lon": 54.0002, "timestamp_s": 1.0},
+            {"lat": 56.0, "lon": 54.0018, "timestamp_s": 2.0},
+        ],
+        "nodes": [
+            {"node_id": 0, "lon": 54.0, "lat": 56.0},
+            {"node_id": 1, "lon": 54.001, "lat": 56.0},
+            {"node_id": 2, "lon": 54.002, "lat": 56.0},
+        ],
+        "arcs": [
+            {"arc_id": 0, "from_node_id": 0, "to_node_id": 1},
+            {"arc_id": 1, "from_node_id": 1, "to_node_id": 2},
+        ],
+    }
+
+    class CandidateRanker:
+        def predict(self, features):
+            return -features["dist"].to_numpy()
+
+    result = matcher(trip_data, runtime_dict={"model": CandidateRanker()})
+
+    assert result["metadata"]["candidate_source"] == "trained_classifier"
+    assert result["route_arc_ids"] == [0, 1]
+    assert all(0.0 < point["confidence"] <= 1.0 for point in result["points"])
+
+
 def test_api_evaluate_handler_reads_reference_after_matching(tmp_path):
     trip_id = "demo"
     trip_dir = tmp_path / trip_id
