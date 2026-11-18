@@ -1,0 +1,44 @@
+{
+  "n_trips": 10,
+  "representation": "stitched",
+  "config": {
+    "beta": 200.0,
+    "alpha": 2.0
+  },
+  "hmm": {
+    "n_trips": 10,
+    "n_evaluable_trips": 10,
+    "total_points": 19160,
+    "total_matched_points": 17517,
+    "mean_coverage": 0.9300175658002058,
+    "mean_rmf": 1.5023051305497377,
+    "mean_edge_precision": 0.38407894375669666,
+    "mean_edge_recall": 0.989390813720729,
+    "mean_edge_f1": 0.5424735657977651,
+    "mean_point_accuracy": 0.5714526135690582,
+    "micro_edge_precision": 0.392905530237714,
+    "micro_edge_recall": 0.9900682805710739,
+    "micro_edge_f1": 0.5625606207565471
+  },
+  "classifier_only": {
+    "n_trips": 10,
+    "n_evaluable_trips": 10,
+    "total_points": 19160,
+    "total_matched_points": 17517,
+    "mean_coverage": 0.9300175658002058,
+    "mean_rmf": 0.956745404318721,
+    "mean_edge_precision": 0.5185423362472837,
+    "mean_edge_recall": 0.5829111657990279,
+    "mean_edge_f1": 0.5468705425359263,
+    "mean_point_accuracy": 0.5194037381497681,
+    "micro_edge_precision": 0.5437032777458309,
+    "micro_edge_recall": 0.5869025450031037,
+    "micro_edge_f1": 0.5644776119402984
+  },
+  "improvement": {
+    "edge_f1": -0.004396976738161196,
+    "rmf": -0.5455597262310167,
+    "point_accuracy": 0.05204887541929004,
+    "coverage": 0.0
+  }
+}
