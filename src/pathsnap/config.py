@@ -1,8 +1,8 @@
 """Configuration for the PathSnap HMM map-matching component.
 
-All values are tunable. Tuning (beta, alpha) MUST be done on training data only
-using a trip-level split; the held-out student_test routes are never consulted
-during configuration selection.
+All values are tunable. Select settings with a trip-level training holdout.
+The student_test partition is available for development checks; never use the
+reserved evaluator_test partition to choose settings.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -24,8 +24,8 @@ class RoutingConfig:
     # Hard plausibility cutoff: a transition is rejected as infeasible when
     # d_route > max(plausibility_factor * d_gc, min_route_gap_m). This prevents
     # a candidate on a far-away road from being selected just because emissions
-    # are high. Set plausibility_factor = 0 to disable the cutoff (only the
-    # hard max_route_distance_m bound remains).
+    # are high. Set both plausibility_factor and min_route_gap_m to 0 to disable
+    # this cutoff (the hard max_route_distance_m bound still remains).
     plausibility_factor: float = 3.0
     min_route_gap_m: float = 50.0
 

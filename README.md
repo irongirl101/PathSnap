@@ -61,7 +61,7 @@ The API looks for `artifacts/final_model.joblib` at startup. Override that path 
 | `PATHSNAP_MATCHER` | `src.pathsnap.api_adapter:matcher` | `module:function` that predicts an arc sequence |
 | `PATHSNAP_EVALUATOR` | `src.pathsnap.api_adapter:evaluate_trip` | `module:function` that scores the predicted sequence |
 | `PATHSNAP_DATA_ROOT` | `<repo>/data` | Directory containing `train/` and `student_test/` trip folders |
-| `PATHSNAP_CONFIG` | unset | Path to a `MatchConfig` YAML file (default: `config/default.yaml`) |
+| `PATHSNAP_CONFIG` | `config/default.yaml` | Optional path to a `MatchConfig` YAML file; this repository default is used when unset |
 | `PATHSNAP_EVAL_DATA_DIR` | `data/evaluator_test` | Trip folders available in the evaluator UI |
 
 ## Member C — HMM map-matching component (`src/pathsnap/`)
@@ -98,8 +98,14 @@ classifier_only(trip_id, points, candidates_by_point) -> MatchResult
 ### Configuration
 
 `config/default.yaml` sets β (transition-distance scale), α (emission weight),
-cutoffs, gap policy, stitching, and cache behavior. Tuned values (training data
-only, trip-level split, seed 42): **β=200.0, α=2.0**.
+transition cutoffs, gap policy, and route stitching. The current API settings
+are **β=10, α=0.25, and plausibility factor=20**. They were selected on a
+trip-level holdout from the training partition using the fitted ranker and the
+same classifier-backed matcher used by the API. The `student_test` trips were
+used only as a development check; the reserved evaluator partition was not
+used to select these settings. See
+[`reports/api_point_accuracy_tuning.md`](reports/api_point_accuracy_tuning.md)
+for the search and validation results.
 
 ### Tuning and results
 

@@ -6,7 +6,18 @@ import numpy as np
 
 from src.api.main import evaluate
 from src.api.schemas import EvaluationRequest
-from src.pathsnap.api_adapter import evaluate_trip, matcher
+from src.pathsnap.api_adapter import _load_config_from_env, evaluate_trip, matcher
+from src.pathsnap.config import load_config
+
+
+def test_api_uses_repository_default_config_when_no_override(monkeypatch):
+    monkeypatch.delenv("PATHSNAP_CONFIG", raising=False)
+
+    actual = _load_config_from_env()
+    expected = load_config("config/default.yaml")
+
+    assert actual.routing == expected.routing
+    assert actual.emission == expected.emission
 
 
 def test_matcher_and_route_scorer_share_the_api_contract():
