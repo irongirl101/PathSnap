@@ -163,6 +163,7 @@ artifacts/*.pkl
 artifacts/*.pickle
 artifacts/*.graphml
 artifacts/*.gpkg
+# Keep .joblib weights trackable; trained model artifacts are submission files.
 env/
 venv/
 ENV/

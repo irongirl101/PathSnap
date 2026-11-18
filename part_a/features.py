@@ -54,17 +54,6 @@ def _shift_valid(positions, groups, offset):
     return safe, in_range & (groups[safe] == groups[positions])
 
 
-def _connections(current, adjacent, previous):
-    if not adjacent:
-        return [np.nan] * len(current)
-    arc_ids = {c.arc_id for c in adjacent}
-    if previous:
-        nodes = {c.to_node for c in adjacent}
-        return [int(c.arc_id in arc_ids or c.from_node in nodes) for c in current]
-    nodes = {c.from_node for c in adjacent}
-    return [int(c.arc_id in arc_ids or c.to_node in nodes) for c in current]
-
-
 def compute_features(graph, batches, contract):
     """Return ordered column arrays for one complete trip, including offline lookahead.
 
@@ -89,13 +78,15 @@ def compute_features(graph, batches, contract):
     cols = dict(dist=dist, frac=np.array([c.offset_fraction for c in flat]),
                 arc_len=length, dist_rank=np.array([c.rank for c in flat]),
                 n_cands=counts[pos], dist_gap_best=dist-best,
-                dist_ratio_best=(dist+0.001)/(best+0.001),
+                dist_ratio_best=dist/(best+1.0),
                 out_deg_end=graph.out_degree[graph.arcs[ids, 1]])
 
+    projected = {}
     for offset, name in [(-2, "dist_p2"), (-1, "dist_p1"), (1, "dist_n1"), (2, "dist_n2")]:
         shifted, valid = _shift_valid(pos, groups, offset)
-        distances, _ = graph.distance(xy[shifted], ids)
+        distances, along = graph.distance(xy[shifted], ids)
         cols[name] = np.where(valid, distances, np.nan)
+        projected[name] = np.where(valid, along * length, np.nan)
     window = [dist, cols["dist_p2"], cols["dist_p1"], cols["dist_n1"], cols["dist_n2"]]
     cols["win_mean_dist"] = np.nanmean(window, axis=0)
     cols["win_max_dist"] = np.nanmax(window, axis=0)
@@ -111,22 +102,56 @@ def compute_features(graph, batches, contract):
     cosine = np.divide(dot, norm_product, out=np.full(len(ids), np.nan), where=norm_product > 0)
     cols["heading_cos"] = np.clip(cosine, -1, 1)
     cols["heading_diff"] = np.degrees(np.arccos(cols["heading_cos"]))
-    cols["along_ratio"] = np.divide(dot, length**2, out=np.full(len(ids), np.nan), where=norm_product > 0)
+    point_along = np.divide(
+        projected["dist_n1"] - projected["dist_p1"],
+        motion_norm,
+        out=np.full(len(ids), np.nan),
+        where=(motion_norm > 5.0) & valid_prev & valid_next,
+    )
+    cols["along_ratio"] = point_along
 
-    step = np.r_[np.nan, np.linalg.norm(np.diff(xy, axis=0), axis=1)]
-    step[np.array([p.gap for p in points], dtype=bool)] = np.nan
-    dt = np.array([p.dt_s if p.dt_s is not None else np.nan for p in points])
-    speed = step / dt
-    next_step = np.r_[step[1:], np.nan]
-    accel = (speed - np.r_[np.nan, speed[:-1]]) / dt
-    cols.update(step_prev=step[pos], step_next=next_step[pos], dt_prev=dt[pos],
-                speed=speed[pos], accel=accel[pos])
+    timestamps = np.array([p.timestamp_s for p in points], dtype=float)
+    dt_prev = np.full(len(points), np.nan)
+    dt_next = np.full(len(points), np.nan)
+    dt_prev_context = np.full(len(points), np.nan)
+    dt_next_context = np.full(len(points), np.nan)
+    step_prev = np.full(len(points), np.nan)
+    step_next = np.full(len(points), np.nan)
+    if len(points) > 1:
+        intervals = np.diff(timestamps)
+        steps = np.linalg.norm(np.diff(xy, axis=0), axis=1)
+        valid = (groups[1:] == groups[:-1]) & (intervals > 0)
+        dt_prev[1:] = intervals
+        dt_next[:-1] = intervals
+        dt_prev_context[1:] = np.where(valid, intervals, np.nan)
+        dt_next_context[:-1] = np.where(valid, intervals, np.nan)
+        step_prev[1:] = np.where(valid, steps, np.nan)
+        step_next[:-1] = np.where(valid, steps, np.nan)
+    previous_speed = np.divide(step_prev, dt_prev_context, out=np.full(len(points), np.nan),
+                               where=dt_prev_context > 0)
+    next_speed = np.divide(step_next, dt_next_context, out=np.full(len(points), np.nan),
+                           where=dt_next_context > 0)
+    span = np.nan_to_num(dt_prev_context) + np.nan_to_num(dt_next_context)
+    speed = np.divide(motion_norm, span[pos], out=np.full(len(ids), np.nan),
+                      where=span[pos] > 0)
+    accel = np.divide(next_speed[pos] - previous_speed[pos], span[pos] / 2,
+                      out=np.full(len(ids), np.nan), where=span[pos] > 0)
+    cols.update(step_prev=step_prev[pos], step_next=step_next[pos],
+                dt_prev=dt_prev[pos], speed=speed, accel=accel)
     for offset, name in [(-1, "conn_prev"), (1, "conn_next")]:
         conn = []
         for i, cs in enumerate(candidates):
             j = i + offset
             adjacent = candidates[j] if 0 <= j < len(points) and groups[i] == groups[j] else ()
-            conn.extend(_connections(cs, adjacent, offset < 0))
+            if not adjacent:
+                conn.extend([np.nan] * len(cs))
+                continue
+            neighbor = adjacent[0]
+            for candidate in cs:
+                same = candidate.arc_id == neighbor.arc_id
+                linked = (neighbor.to_node == candidate.from_node if offset < 0
+                          else candidate.to_node == neighbor.from_node)
+                conn.append(1.0 if same or linked else 0.0)
         cols[name] = np.asarray(conn)
 
     if set(cols) != set(contract.columns):

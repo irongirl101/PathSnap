@@ -16,6 +16,7 @@ import pandas as pd
 from src.features.candidates import generate_candidates as generate_feature_candidates
 from src.features.features import FEATURE_COLS, Network, add_features
 from src.features.loader import to_local_xy
+from src.models.wrapper import PathSnapModel
 from src.pathsnap.candidates import generate_candidates as generate_geometric_candidates
 from src.pathsnap.config import MatchConfig, load_config
 from src.pathsnap.evaluate import (
@@ -33,7 +34,7 @@ def _data_root() -> Path:
     configured = os.getenv("PATHSNAP_DATA_ROOT")
     if configured:
         return Path(configured)
-    return Path(__file__).resolve().parents[2] / "data"
+    return Path(__file__).resolve().parents[2] / "data" / "raw"
 
 
 def _find_trip_dir(trip_id: str, data_root: Path) -> Path | None:
@@ -185,7 +186,13 @@ def _classifier_candidates(
 
     candidates = add_features(network, track_xy, candidates)
     feature_rows = candidates[FEATURE_COLS]
-    if callable(getattr(classifier, "predict_proba", None)):
+    if isinstance(classifier, PathSnapModel):
+        feature_rows = feature_rows.copy()
+        feature_rows["trip_id"] = trip_id
+        feature_rows["point_idx"] = candidates["pos"].to_numpy()
+    if isinstance(classifier, PathSnapModel):
+        probabilities = classifier.predict_proba(feature_rows)
+    elif callable(getattr(classifier, "predict_proba", None)):
         class_ids = list(getattr(classifier, "classes_", [0, 1]))
         if 1 not in class_ids:
             raise ValueError("Loaded final model has no positive candidate class (label 1)")

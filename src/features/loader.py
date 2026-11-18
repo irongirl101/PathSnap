@@ -8,10 +8,10 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-# ---- EDIT AFTER INSPECTING THE FILES ---------------------------------------
-NODES_COLS = ["lat", "lon"]                     # .nodes: node id = row number (0-based)
+# ---- Raw dataset schema ----------------------------------------------------
+NODES_COLS = ["lon", "lat"]                     # .nodes: node id = row number (0-based)
 ARCS_COLS  = ["u", "v"]                         # .arcs : arc id  = row number (0-based)
-TRACK_COLS = ["lat", "lon", "t"]                # .track: 1 Hz, t = 1, 2, 3, ...
+TRACK_COLS = ["lon", "lat", "t"]                # .track: longitude, latitude, time
 COORDS_ARE_LATLON = True
 HEADER = None                                   # no header rows
 # -----------------------------------------------------------------------------

@@ -42,10 +42,10 @@ class TestFeatures(unittest.TestCase):
         self.assertEqual(list(table["dist_rank"]), [1, 1, 2, 1, 1])
         np.testing.assert_allclose(table["heading_diff"], [0, 0, 180, 0, 0])
         np.testing.assert_allclose(table["heading_cos"], [1, 1, -1, 1, 1])
-        np.testing.assert_allclose(table["along_ratio"], [1, 2, -2, 1, 1])
+        np.testing.assert_allclose(table["along_ratio"], [np.nan, .5, -.5, np.nan, np.nan])
         np.testing.assert_allclose(table["conn_prev"], [np.nan, 1, 0, np.nan, 1])
         np.testing.assert_allclose(table["conn_next"], [1, np.nan, np.nan, 1, np.nan])
-        np.testing.assert_allclose(table["speed"], [np.nan, 111.31949, 111.31949, np.nan, 55.659745],
+        np.testing.assert_allclose(table["speed"], [111.31949, 111.31949, 111.31949, 55.659745, 55.659745],
                                    rtol=1e-6)
         self.assertEqual(table["dt_prev"][3], 19)
         self.assertTrue(np.isnan(table["dist_n2"][1]))
@@ -84,7 +84,7 @@ class TestFeatures(unittest.TestCase):
         table = compute_features(self.graph, [(self.points[0], [
             self.candidate(0), self.candidate(1, 2, distance=1)
         ])], self.contract)
-        np.testing.assert_allclose(table["dist_ratio_best"], [1, 1001])
+        np.testing.assert_allclose(table["dist_ratio_best"], [0, 1])
         np.testing.assert_allclose(table["dist_gap_best"], [0, 1])
         np.testing.assert_allclose(table["n_cands"], [2, 2])
 

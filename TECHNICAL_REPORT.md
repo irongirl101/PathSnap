@@ -121,14 +121,14 @@ just GPS and the road network.
 | --- | --- |
 | `dist`, `frac`, `arc_len` | Metre distance to the candidate, clamped projection fraction from its directed start, and metre segment length. |
 | `dist_rank`, `n_cands` | One-based distance rank and count of returned candidates at the observation. |
-| `dist_gap_best`, `dist_ratio_best` | Difference from the best distance and ratio with 0.001 m added to both distances. |
+| `dist_gap_best`, `dist_ratio_best` | Difference from the best distance and candidate distance divided by the best distance plus 1 m. |
 | `heading_diff`, `heading_cos` | Angle in degrees and cosine between directed arc and local GPS motion. GPS motion uses the previous-to-next chord, or the available one-sided step. |
-| `along_ratio` | Signed projection of that motion along the road divided by arc length. This dimensionless value can exceed 1 or be negative. |
+| `along_ratio` | Difference in projected along-arc positions for the previous and next samples, divided by the GPS chord length. |
 | `dist_p2`, `dist_p1`, `dist_n1`, `dist_n2` | Distances in metres from nearby GPS samples to the current candidate arc. |
 | `win_mean_dist`, `win_max_dist` | Mean and maximum of the available distances in the five-observation window, including the current point. |
-| `conn_prev`, `conn_next` | Category 1 if any adjacent-observation candidate is the same arc or has a directionally compatible shared node, else 0 when an adjacent candidate list is available. |
+| `conn_prev`, `conn_next` | Compared with the nearest candidate at the adjacent observation: 1 for the same arc or a directionally connected arc, and 0 otherwise. Missing adjacent candidate lists yield a missing value. |
 | `out_deg_end` | Directed outgoing arc count at the candidate's end node, counting parallel arcs. |
-| `step_prev`, `step_next`, `speed`, `accel`, `dt_prev` | Distances to previous and next GPS samples in metres, backward speed in m/s, backward difference of speeds over current elapsed time in m/s², and previous elapsed time in seconds. |
+| `step_prev`, `step_next`, `speed`, `accel`, `dt_prev` | Adjacent GPS distances in metres, speed over the previous-to-next chord in m/s (one-sided at trip ends), difference of adjacent interval speeds divided by their mean interval in m/s², and previous elapsed time in seconds. |
 
 Features requiring context use blank CSV fields for unavailable values at
 trip edges, across GPS gaps over 5 s, or when heading is undefined due to zero
@@ -140,13 +140,21 @@ retains the raw row index, including after filtering. An observation with an
 empty candidate list contributes no feature row and remains represented in the
 offline audit and candidate batch stream.
 
+The main training/inference feature implementation is
+[`src/features/features.py`](src/features/features.py). The route-free Part A
+exporter in `part_a/features.py` follows the same feature semantics; geographic
+projection can differ slightly because the two pipelines use different local
+projection approximations. The shared raw coordinate order is longitude,
+latitude, corrected in `src/features/loader.py`.
+
 The contract specifies column names, order, exclusions and categorical fields.
 It leaves units, formulas, category values and missing-value encoding open.
 The table records our choices. Category values are fixed across splits and
 cast to pandas categorical dtype. Any estimator-specific encoding or
 imputation belongs in the training pipeline, fitted within training folds.
-The repository remained unreachable, so Member B's actual estimator and
-preprocessing code could not be checked.
+The comparison/evaluation code is in `src/models/` and uses trip-level grouped
+cross-validation. See `reports/student_test/` for the actual student-test
+evaluation produced by the current model run.
 
 | Export split | Trips | Candidate-feature rows |
 | --- | ---: | ---: |
@@ -161,8 +169,9 @@ trip with exhaustive road search, and checked every feature row against its
 split assignment, contract header and source candidate ID. It compared
 the exported features with route-free inference on one trip per split.
 All 12 unit and fixture integration tests passed, including the NetworkX
-adapter. Folium was unavailable locally and the package includes geographic
-PNG overlays and optional HTML generation code.
+adapter. The map generator creates Folium HTML and PNG views, including the actual
+student-test prediction, reference route and GPS observations. The main
+requirements file includes Folium so the interactive view can be reproduced.
 
 This package and report were produced with AI assistance. Reproduce the
 run, review the independent analysis and disclose assistance as required

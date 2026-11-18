@@ -2,7 +2,7 @@
 
 usage: python -m src.features.build_dataset data/raw/train
 """
-import hashlib, pathlib, sys
+import hashlib, pathlib
 import numpy as np, pandas as pd
 from src.features.loader import load_trip, to_local_xy
 from src.features.features import Network, build_trip_table, candidate_recall, save_feature_spec
@@ -15,7 +15,7 @@ def net_key(d):
     return h.hexdigest()
 
 
-def main(root, out="data/processed/candidates.parquet"):
+def main(root, out="data/processed/candidates.parquet", summary_path="reports/trip_summary.csv"):
     root = pathlib.Path(root)
     nets, tables, summary = {}, [], []
     for d in sorted(p for p in root.iterdir() if p.is_dir()):
@@ -46,13 +46,23 @@ def main(root, out="data/processed/candidates.parquet"):
     pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out, index=False)
     s = pd.DataFrame(summary)
-    pathlib.Path("reports").mkdir(exist_ok=True)
-    s.to_csv("reports/trip_summary.csv", index=False)
+    if summary_path:
+        summary_path = pathlib.Path(summary_path)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        s.to_csv(summary_path, index=False)
     save_feature_spec()
     print(s.round(2).to_string(index=False))
     print(f"\nrows {len(df)} | positives {int(df.label.sum())} | overall candidate recall {candidate_recall(df):.3f}")
-    print(f"saved {out}, reports/trip_summary.csv, artifacts/feature_columns.json")
+    print(f"saved {out}" + (f", {summary_path}" if summary_path else "") +
+          ", artifacts/feature_columns.json")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("root")
+    parser.add_argument("--out", default="data/processed/candidates.parquet")
+    parser.add_argument("--summary-path", default="reports/trip_summary.csv")
+    args = parser.parse_args()
+    main(args.root, args.out, args.summary_path)

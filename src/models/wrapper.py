@@ -1,6 +1,7 @@
 """The single object saved to artifacts/model.joblib: classifier + calibrator + feature list.
 Must stay importable as src.models.wrapper so joblib can unpickle it on Laptop 1."""
 import platform
+from importlib.metadata import PackageNotFoundError, version
 import joblib
 import numpy as np
 import pandas as pd
@@ -34,10 +35,13 @@ class PathSnapModel:
         return (p / p.groupby([df[k] for k in keys]).transform("sum")).to_numpy()
 
     def save(self, path="artifacts/model.joblib"):
-        import sklearn, lightgbm, xgboost
-        self.meta.update(python=platform.python_version(), sklearn=sklearn.__version__,
-                         lightgbm=lightgbm.__version__, xgboost=xgboost.__version__,
-                         pandas=pd.__version__, numpy=np.__version__)
+        self.meta.update(python=platform.python_version(), sklearn=version("scikit-learn"),
+                         lightgbm=version("lightgbm"), pandas=pd.__version__,
+                         numpy=np.__version__)
+        try:
+            self.meta["xgboost"] = version("xgboost")
+        except PackageNotFoundError:
+            self.meta.pop("xgboost", None)
         joblib.dump(self, path)
 
     @staticmethod

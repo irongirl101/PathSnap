@@ -50,7 +50,7 @@ def configure_runtime(app: Any) -> None:
         "PATHSNAP_EVALUATOR",
     )
     app.state.evaluation_data_dir = Path(
-        os.getenv("PATHSNAP_EVAL_DATA_DIR", root / "data" / "evaluator_test")
+        os.getenv("PATHSNAP_EVAL_DATA_DIR", root / "data" / "raw" / "evaluator_test")
     )
 
 
