@@ -528,12 +528,12 @@ def match_trip(
         chosen, score = _viterbi_segment(
             graph, config, seg_cands, coords[start:end + 1], pidxs[start:end + 1]
         )
-        seg_list.append(Segment(start, end, [seg_cands[t][chosen[t]].cand_id
-                                              for t in range(len(chosen))],
+        seg_list.append(Segment(start, end, [seg_cands[t - start][chosen[t - start]].cand_id
+                                              for t in range(start, end + 1)],
                                 score))
         total_score += score
         for t, cand in zip(range(start, end + 1), chosen):
-            matched[t] = seg_cands[t][cand]
+            matched[t] = seg_cands[t - start][cand]
 
     # Break points: any point with no candidates
     for i in range(n):

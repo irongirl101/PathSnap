@@ -1,0 +1,21 @@
+routing:
+  beta: 200.0
+  max_route_distance_m: 2000.0
+  directed: true
+  plausibility_factor: 3.0
+  min_route_gap_m: 50.0
+gap:
+  index_gap_threshold: 1
+  distance_gap_threshold_m: 500.0
+  record_gaps: true
+emission:
+  alpha: 2.0
+  emission_floor: 1.0e-12
+  validate_nonnegative: true
+stitching:
+  enable_stitching: true
+  dedupe_consecutive: true
+  bridge_policy: shortest_path
+  bridge_max_distance_m: null
+tie_break: first
+seed: 42
