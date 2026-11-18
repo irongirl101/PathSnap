@@ -1,0 +1,41 @@
+# PathSnap HMM map-matching configuration (Member C component).
+#
+# Tuning (beta, alpha) is performed on TRAINING data only with a trip-level
+# split. Held-out student_test routes are never used to select this config.
+
+routing:
+  # Transition-distance scale (metres): log_transition = -|d_gc - d_route| / beta
+  beta: 100.0
+  # Hard bound for bounded Dijkstra (metres). Queries exceeding this are unreachable.
+  max_route_distance_m: 2000.0
+  # Treat the road network as directed.
+  directed: true
+  # Plausibility cutoff: reject transition if d_route > max(factor*d_gc, min_gap).
+  # Set plausibility_factor to 0 to disable (only the hard bound applies).
+  plausibility_factor: 3.0
+  min_route_gap_m: 50.0
+
+gap:
+  # Detect a gap when the point-index difference between consecutive
+  # observations exceeds this value (1 = no gap, since indices increment by 1).
+  index_gap_threshold: 1
+  # Distance-based fallback gap threshold (metres). <= 0 disables.
+  distance_gap_threshold_m: 500.0
+  record_gaps: true
+
+emission:
+  # Exponent on classifier log-probability: alpha * log(emission).
+  # alpha=1 raw classifier; alpha=0 ignores classifier (uniform/geometric ablation).
+  alpha: 1.0
+  emission_floor: 1e-12
+  validate_nonnegative: true
+
+stitching:
+  enable_stitching: true
+  dedupe_consecutive: true
+  # Bridge policy across gaps / lattice breaks: 'shortest_path' | 'none'
+  bridge_policy: shortest_path
+  bridge_max_distance_m: null   # null => reuse routing.max_route_distance_m
+
+tie_break: first   # 'first' | 'last' deterministic Viterbi tie-breaking
+seed: 42           # random seed for train/validation split
