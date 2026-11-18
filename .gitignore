@@ -158,6 +158,7 @@ activemq-data/
 data/raw/
 data/train/
 data/student_test/
+data/evaluator_test/
 artifacts/*.joblib
 artifacts/*.pkl
 artifacts/*.pickle

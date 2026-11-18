@@ -1,6 +1,5 @@
 """Stable JSON contracts shared by the PathSnap API and browser UI."""
 
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -11,7 +10,7 @@ class GPSPoint(BaseModel):
 
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
-    timestamp: datetime | None = None
+    timestamp_s: float | None = None
 
 
 class MapMatchRequest(BaseModel):
@@ -26,7 +25,7 @@ class MatchedPoint(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     node_id: str | int | None = None
-    edge_id: str | int | None = None
+    arc_id: str | int | None = None
     confidence: float | None = Field(default=None, ge=0, le=1)
 
 
@@ -39,11 +38,21 @@ class MapMatchResponse(BaseModel):
 
 
 class EvaluationRequest(BaseModel):
-    trip_ids: list[str] | None = None
+    trip_id: str = Field(min_length=1, max_length=128)
 
 
 class EvaluationResponse(BaseModel):
-    evaluated_trips: int = Field(ge=0)
+    trip_id: str
+    route_arc_ids: list[str | int]
+    trace: list[GPSPoint] = Field(default_factory=list)
+    points: list[MatchedPoint] = Field(default_factory=list)
     metrics: dict[str, float | int | None]
-    per_trip: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TripListItem(BaseModel):
+    trip_id: str
+
+
+class TripListResponse(BaseModel):
+    trips: list[TripListItem]

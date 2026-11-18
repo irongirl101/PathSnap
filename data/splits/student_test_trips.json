@@ -1,5 +1,6 @@
 {
   "source": "student_test",
+  "purpose": "Development-stage comparison only; not the reserved evaluator-testing partition.",
   "trip_ids": [
     "00000000",
     "00000007",
@@ -11,6 +12,5 @@
     "00000076",
     "00000077",
     "00000091"
-  ],
-  "ground_truth": "Each trip's .route file contains an ordered arc sequence; do not treat it as per-point labels."
+  ]
 }
