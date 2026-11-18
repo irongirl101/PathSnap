@@ -1,0 +1,16 @@
+{
+  "source": "student_test",
+  "trip_ids": [
+    "00000000",
+    "00000007",
+    "00000009",
+    "00000040",
+    "00000052",
+    "00000056",
+    "00000065",
+    "00000076",
+    "00000077",
+    "00000091"
+  ],
+  "ground_truth": "Each trip's .route file contains an ordered arc sequence; do not treat it as per-point labels."
+}

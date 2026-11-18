@@ -153,6 +153,16 @@ activemq-data/
 .env
 .envrc
 .venv
+
+# Local datasets and generated model/graph artifacts
+data/raw/
+data/train/
+data/student_test/
+artifacts/*.joblib
+artifacts/*.pkl
+artifacts/*.pickle
+artifacts/*.graphml
+artifacts/*.gpkg
 env/
 venv/
 ENV/
