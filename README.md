@@ -4,31 +4,41 @@ PathSnap matches GPS traces to the roads a vehicle likely travelled. The project
 
 ## Start the API and UI
 
-Use Python 3.10 or newer. From the repository folder, run:
+Use Python 3.11 or newer. Extract the supplied data into `data/raw/train`
+and `data/raw/student_test`; the raw data and processed Parquet files are
+intentionally ignored by Git. From the repository folder, run:
 
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
-$env:PYTHONPATH = (Get-Location).Path
-uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+PATHSNAP_EVAL_DATA_DIR=data/raw/student_test uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 ```
 
+On Windows, activate with `.venv\Scripts\Activate.ps1`.
 Then open `http://localhost:8000`. The API docs are at `http://localhost:8000/docs`.
 
 For a two-laptop demo, run the API on Laptop 1 and open `http://<Laptop-1-private-IP>:8000` from Laptop 2 on the same trusted network. If Windows asks, allow inbound connections on port 8000.
 
 ## Trip data and evaluation
 
-The dataset has three partitions: 80 training trips, 10 `student_test` trips for development comparisons, and 10 reserved `evaluator_test` trips for the final evaluation. The supplied `Student folder.zip` contains the training and student-test data; it does not include the reserved evaluator trips. The student-test trip IDs are in [`data/splits/test_trips.json`](data/splits/test_trips.json).
+The supplied development dataset has 80 training trips and 10 separate
+`student_test` trips. A further 10 `evaluator_test` trips are reserved for the
+live evaluation and are not included in this repository. The development
+student-test trip IDs are in
+[`data/splits/student_test_trips.json`](data/splits/student_test_trips.json).
 
-Keep the final evaluator data on Laptop 1 under `data/evaluator_test`, preserving the per-trip folders and filenames. To try the UI during development, you can point `PATHSNAP_DATA_ROOT` at your extracted `student_test` folder. Point it back at `data/evaluator_test` for the final evaluation. Don’t use results from the reserved evaluator trips to tune the model.
+Keep the final evaluator data on Laptop 1 under `data/raw/evaluator_test`,
+preserving the per-trip folders and filenames. For development, point
+`PATHSNAP_EVAL_DATA_DIR` at `data/raw/student_test`; use
+`data/raw/evaluator_test` for the final evaluation. Don’t use results from the
+reserved evaluator trips to tune the model.
 
 The API reads `.track`, `.nodes`, and `.arcs` to make a prediction. It opens the trip’s `.route` file only after prediction, for server-side scoring. The browser receives the trip ID, predicted route, and metrics; it never receives the reference route.
 
 Each trip folder has four whitespace-separated files without headers:
 
-- `.track`: longitude, latitude, point index (1-based sequential; gaps possible).
+- `.track`: longitude, latitude, timestamp in seconds (timestamps may have gaps).
 - `.nodes`: longitude, latitude; the row number is the node ID.
 - `.arcs`: from-node ID and to-node ID; the row number is the arc ID (directed).
 - `.route`: the chronological sequence of reference arc IDs (0-based).
@@ -39,13 +49,55 @@ An arc ID belongs to one trip’s graph. When joining arcs to features or graph 
 
 The browser asks `GET /api/v1/trips` for the available trip IDs. When someone selects a trip, it sends that ID to `POST /api/v1/evaluate`. The API runs the matcher, compares its arc sequence with the reference route, and returns the prediction and metrics.
 
-The API loads the HMM matcher and route scorer from `src.pathsnap.api_adapter`. The training code compares classifiers and a LambdaRank candidate ranker using trip-grouped cross-validation. To evaluate the ranker and save a final model fitted on the training trips, run:
+The API loads the HMM matcher and route scorer from
+[`src/pathsnap/api_adapter.py`](src/pathsnap/api_adapter.py). Model experiments
+use trip-grouped cross-validation on the training partition and evaluate
+separately on the supplied student-test partition. Rebuild features and run
+those experiments with:
 
 ```bash
-python -m src.models.train_models --models lgbm_ranker --save-model artifacts/final_model.joblib
+python -m src.features.build_dataset data/raw/train
+python -m src.features.build_dataset data/raw/student_test \
+  --out data/processed/student_test_candidates.parquet \
+  --summary-path reports/student_test/trip_summary.csv
+python -m src.models.evaluate_student_test
 ```
 
-The adapter accepts either a classifier with `predict_proba` or a ranker with `predict`; ranker scores are normalized within each GPS point before they are used as HMM emissions. The current branch does not include a fitted model artifact, so predictions use the geometric candidate baseline until the training command is run. The health endpoint reports whether a model was loaded.
+The evaluation writes per-fold and student-test results, confusion matrices,
+raw observation-quality and feature-missingness summaries, and comparison plots
+under `reports/student_test/`. It selects the final estimator using training-only
+CV macro F1 and writes the deployable calibrated wrapper to
+`artifacts/final_model.joblib`. Existing `.joblib` files are versioned model
+deliverables, not ignored checkpoints.
+The older root-level `reports/model_table.csv` is from an internal training-trip
+holdout and is not the supplied student-test evaluation.
+
+To run Bayesian tuning of the LightGBM classifier on training trips only, then
+include its tuned model in the same comparison:
+
+```bash
+python -m src.models.bayes --model lgbm --trials 20 --frac 0.3
+python -m src.models.evaluate_student_test \
+  --tuned-params artifacts/best_params_lgbm.json
+```
+
+Optuna trials and best parameters are written to `reports/optuna/` and
+`artifacts/best_params_lgbm.json`. The adapter accepts either a classifier or
+the calibrated `PathSnapModel` wrapper; ranker outputs are normalized within
+each GPS point before they are used as HMM emissions. The health endpoint
+reports whether an artifact was loaded.
+
+Generate a representative map from a real student-test prediction and build
+the evidence PDF after evaluation:
+
+```bash
+python scripts/generate_student_test_map.py --trip-id 00000000
+python scripts/build_submission_report.py
+```
+
+The generated report includes recorded model metrics and the HMM/classifier-only
+route comparison. It is an evidence report; team members must verify the
+interpretation and capture the required receiving-laptop terminal screenshot.
 
 The matcher receives a dictionary containing `trip_id`, ordered GPS points, nodes, and arcs, plus runtime state with the optional model artifact. It returns a stitched `route_arc_ids` sequence and per-observation matches for the map preview. The model-backed path uses the feature generator and the loaded model’s probabilities or point-normalized ranking scores as HMM emissions. Override the default with `PATHSNAP_MATCHER=package.module:function` if the team changes the matcher adapter.
 
@@ -60,9 +112,9 @@ The API looks for `artifacts/final_model.joblib` at startup. Override that path 
 | `PATHSNAP_MODEL_PATH` | `artifacts/final_model.joblib` | Classifier artifact loaded at startup |
 | `PATHSNAP_MATCHER` | `src.pathsnap.api_adapter:matcher` | `module:function` that predicts an arc sequence |
 | `PATHSNAP_EVALUATOR` | `src.pathsnap.api_adapter:evaluate_trip` | `module:function` that scores the predicted sequence |
-| `PATHSNAP_DATA_ROOT` | `<repo>/data` | Directory containing `train/` and `student_test/` trip folders |
+| `PATHSNAP_DATA_ROOT` | `<repo>/data/raw` | Directory containing `train/`, `student_test/`, and optionally `evaluator_test/` |
 | `PATHSNAP_CONFIG` | unset | Path to a `MatchConfig` YAML file (default: `config/default.yaml`) |
-| `PATHSNAP_EVAL_DATA_DIR` | `data/evaluator_test` | Trip folders available in the evaluator UI |
+| `PATHSNAP_EVAL_DATA_DIR` | `data/raw/evaluator_test` | Trip folders available in the evaluator UI; set to `data/raw/student_test` for development |
 
 ## Member C — HMM map-matching component (`src/pathsnap/`)
 
@@ -134,4 +186,7 @@ evaluator into `/api/v1/evaluate`.
 - `tests/` contains API and trip-reader tests. Run them from the repository folder with `pytest`.
 - `reports/` is for evaluation summaries and plots.
 
-Don’t commit credentials or local/private trip data. The repository’s `.gitignore` excludes common data and model artifacts.
+Run the test suite with `python -m pytest -q`. Don’t commit credentials or
+local/private trip data. `.gitignore` excludes raw and generated processed
+data, but intentionally allows the fitted `.joblib` deployment artifacts to
+be committed.

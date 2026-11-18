@@ -1,4 +1,7 @@
-"""Compare candidate scorers: trip-grouped CV + a fixed held-out trip set ("student test").
+"""Compare candidate scorers: trip-grouped CV + an internal training-trip holdout.
+
+This internal holdout is not the supplied student_test partition. Use
+src.models.evaluate_student_test for the official student-test comparison.
 
 usage: python -m src.models.train_models --exclude 00000054 [--frac 0.5] [--models lgbm lgbm_ranker]
 
@@ -10,7 +13,7 @@ Evaluation conventions
     candidate / no labelled candidate count as misses (the honest end-to-end number).
   * macro F1: highest-scored candidate of each point = predicted 1, others 0; mean of F1 over {0,1}.
 
-Writes reports/: results.csv (CV mean/std), results_per_fold.csv (incl. test row), model_table.csv
+Writes reports/: results.csv (CV mean/std), results_per_fold.csv (incl. holdout row), model_table.csv
 (layout of the brief), confusion_matrices.csv, oof_predictions.parquet, splits.json
 """
 import argparse, json, pathlib, time
@@ -37,8 +40,9 @@ REPORTS = pathlib.Path("reports")
 
 INFO = {   # (algorithm family, key configuration) for the report table
     "logreg": ("Linear (logistic regression)", "median impute + scale, L2, C=1"),
-    "rf": ("Bagged trees (random forest)", "60 trees, depth 10, min leaf 50"),
+    "rf": ("Bagged trees (random forest)", "32 trees, depth 10, min leaf 50, 25% row subsample"),
     "lgbm": ("Gradient boosting (LightGBM classifier)", "400 trees, lr 0.05, 63 leaves"),
+    "lgbm_tuned": ("Gradient boosting (LightGBM, Optuna TPE)", "Optuna-tuned; details in study outputs"),
     "lgbm_ranker": ("Learning-to-rank (LightGBM LambdaRank)", "500 trees, lr 0.05, 31 leaves, per-point softmax"),
     "mlp": ("Neural network (MLP)", "64-32 ReLU, early stopping"),
     "svm": ("Linear SVM (LinearSVC + sigmoid calibration)", "C=1, 3-fold Platt calibration"),
@@ -50,8 +54,9 @@ def get_models():
     imp = lambda: SimpleImputer(strategy="median", add_indicator=True)
     return {
         "logreg": make_pipeline(imp(), StandardScaler(), LogisticRegression(max_iter=1000)),
-        "rf": make_pipeline(imp(), RandomForestClassifier(60, max_depth=10, min_samples_leaf=50,
-                                                          n_jobs=-1, random_state=SEED)),
+        "rf": make_pipeline(imp(), RandomForestClassifier(32, max_depth=10, min_samples_leaf=50,
+                                                          max_samples=0.25, n_jobs=-1,
+                                                          random_state=SEED)),
         "lgbm": lgb.LGBMClassifier(n_estimators=400, learning_rate=0.05, num_leaves=63, subsample=0.8,
                                    subsample_freq=1, colsample_bytree=0.8, random_state=SEED, verbose=-1),
         "lgbm_ranker": lgb.LGBMRanker(objective="lambdarank", metric="ndcg", n_estimators=500,
@@ -155,7 +160,7 @@ def load(path, exclude, frac, raw_root):
 
 
 def get_splits(trips, exclude, test_frac):
-    """Fixed trip-level split ('cv' / 'test'), written once so the whole team uses the same one."""
+    """Fixed split of training trips into CV and internal holdout groups."""
     f = REPORTS / "splits.json"
     if f.exists():
         return json.loads(f.read_text())
@@ -236,7 +241,7 @@ def main(path, exclude, frac, cv_splits, names, raw_root, test_frac, output_dir,
         "Top-1 accuracy (CV, all raw points)": [ms_(m, "top1_e2e") for m in agg.index],
         "Top-1 (labelled points only)": [ms_(m, "top1") for m in agg.index],
         "Route continuity": ["(from HMM pipeline)"] * len(agg),
-        "Student-test macro F1": [f"{ter.loc[m, 'macro_f1']:.3f}" for m in agg.index],
+        "Training-holdout macro F1": [f"{ter.loc[m, 'macro_f1']:.3f}" for m in agg.index],
         "Log loss (CV)": [f"{agg.loc[m, 'log_loss_mean']:.4f}" for m in agg.index],
         "Inference ms / 1k rows": [f"{ter.loc[m, 'infer_ms_per_1k']:.1f}" for m in agg.index]})
     tab.to_csv(out / "model_table.csv", index=False)

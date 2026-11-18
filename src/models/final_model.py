@@ -1,7 +1,10 @@
-"""Fit the final scorer, calibrate it, evaluate on the held-out test trips, save artifacts/model.joblib.
+"""Fit a scorer and calibrator using the training partition's internal holdout.
 
 usage: python -m src.models.final_model --model lgbm          # Optuna-tuned classifier (needs best_params_lgbm.json)
        python -m src.models.final_model --model lgbm_ranker   # LambdaRank + per-point softmax (default config)
+
+For the supplied student_test partition and final deployment artifact, use
+src.models.evaluate_student_test instead.
 """
 import argparse, json
 import numpy as np
@@ -28,7 +31,7 @@ def main(name, frac, exclude, test_frac, raw_root, cv_splits=5):
     if ranker:
         make, params, untuned = (lambda: get_models()["lgbm_ranker"]), {}, None
     else:
-        from src.models.bayes_opt import build_model, DEFAULTS
+        from src.models.bayes import build_model, DEFAULTS
         params = json.load(open(f"artifacts/best_params_{name}.json"))["params"]
         make = lambda: build_model(name, params)
         untuned = lambda: build_model(name, DEFAULTS[name])

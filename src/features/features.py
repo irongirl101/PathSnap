@@ -54,19 +54,29 @@ def point_features(track: pd.DataFrame) -> pd.DataFrame:
     t = track["t"].to_numpy(float) if "t" in track else np.full(len(track), np.nan)
     xp, yp, tp = _shift(x, 1), _shift(y, 1), _shift(t, 1)
     xn, yn, tn = _shift(x, -1), _shift(y, -1), _shift(t, -1)
+    dt_prev = t - tp
+    dt_next = tn - t
+    if "t" in track:
+        prev_ok = np.isfinite(tp) & ((t - tp) <= 5.0)
+        next_ok = np.isfinite(tn) & ((tn - t) <= 5.0)
+        xp, yp, tp = (np.where(prev_ok, a, np.nan) for a in (xp, yp, tp))
+        xn, yn, tn = (np.where(next_ok, a, np.nan) for a in (xn, yn, tn))
+        dt_prev_context = np.where(prev_ok, dt_prev, np.nan)
+        dt_next_context = np.where(next_ok, dt_next, np.nan)
+    else:
+        dt_prev_context, dt_next_context = dt_prev, dt_next
     x0, y0, t0 = np.where(np.isnan(xp), x, xp), np.where(np.isnan(yp), y, yp), np.where(np.isnan(tp), t, tp)
     x1, y1, t1 = np.where(np.isnan(xn), x, xn), np.where(np.isnan(yn), y, yn), np.where(np.isnan(tn), t, tn)
     mdx, mdy = x1 - x0, y1 - y0
     move = np.hypot(mdx, mdy)
     bearing = np.where(move >= MIN_MOVE_M, np.degrees(np.arctan2(mdx, mdy)) % 360.0, np.nan)
-    dt_prev, dt_next = t - tp, tn - t
     step_prev, step_next = np.hypot(x - xp, y - yp), np.hypot(xn - x, yn - y)
     with np.errstate(divide="ignore", invalid="ignore"):
         span = t1 - t0
         speed = np.where(span > 0, move / span, np.nan)
-        sp_prev = np.where(dt_prev > 0, step_prev / dt_prev, np.nan)
-        sp_next = np.where(dt_next > 0, step_next / dt_next, np.nan)
-        accel = (sp_next - sp_prev) / ((dt_prev + dt_next) / 2)
+        sp_prev = np.where(dt_prev_context > 0, step_prev / dt_prev_context, np.nan)
+        sp_next = np.where(dt_next_context > 0, step_next / dt_next_context, np.nan)
+        accel = (sp_next - sp_prev) / ((dt_prev_context + dt_next_context) / 2)
     return pd.DataFrame(dict(move_bearing=bearing, step_prev=step_prev, step_next=step_next,
                              speed=speed, accel=accel, dt_prev=dt_prev))
 
@@ -88,10 +98,17 @@ def add_features(net: Network, track: pd.DataFrame, c: pd.DataFrame) -> pd.DataF
     c["heading_cos"] = np.cos(np.radians(c["heading_diff"]))
     # same arc as seen from neighbouring points
     pos = c["pos"].to_numpy()
+    timestamps = track["t"].to_numpy(float) if "t" in track else np.full(n, np.nan)
+    breaks = np.zeros(n, dtype=bool)
+    if n > 1:
+        intervals = np.diff(timestamps)
+        breaks[1:] = np.isfinite(intervals) & (intervals > 5.0)
+    groups = np.cumsum(breaks)
     ss, xy = {}, {}
     for name, k in [("p2", -2), ("p1", -1), ("n1", 1), ("n2", 2)]:
         npos = pos + k
-        ok = (npos >= 0) & (npos < n)
+        in_range = (npos >= 0) & (npos < n)
+        ok = in_range & (groups[np.clip(npos, 0, n - 1)] == groups[pos])
         px, py = np.full(len(c), np.nan), np.full(len(c), np.nan)
         px[ok], py[ok] = x[npos[ok]], y[npos[ok]]
         d, s, _ = net.project(px, py, arc)
@@ -109,14 +126,15 @@ def add_features(net: Network, track: pd.DataFrame, c: pd.DataFrame) -> pd.DataF
     first = c.groupby("pos")["arc_idx"].first()
     best_arc[first.index.to_numpy()] = first.to_numpy()
     def conn(other_pos, forward):
-        ok = (other_pos >= 0) & (other_pos < n)
+        in_range = (other_pos >= 0) & (other_pos < n)
+        ok = in_range & (groups[np.clip(other_pos, 0, n - 1)] == groups[pos])
         oa = np.where(ok, best_arc[np.clip(other_pos, 0, n - 1)], -1)
         same = oa == arc
         if forward:   # previous best arc ends where this one starts
             link = net.v[np.where(oa >= 0, oa, 0)] == net.u[arc]
         else:         # this arc ends where next best arc starts
             link = net.v[arc] == net.u[np.where(oa >= 0, oa, 0)]
-        out = np.where(same, 2.0, np.where(link, 1.0, 0.0))
+        out = np.where(same | link, 1.0, 0.0)
         return np.where(oa >= 0, out, np.nan)
     c["conn_prev"] = conn(pos - 1, True)
     c["conn_next"] = conn(pos + 1, False)

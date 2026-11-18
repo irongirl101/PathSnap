@@ -1,6 +1,6 @@
 """Bayesian hyper-parameter optimisation (Optuna TPE) with trip-grouped CV on the training trips only.
 
-usage: python -m src.models.bayes_opt --model lgbm --trials 40 --frac 0.3
+usage: python -m src.models.bayes --model lgbm --trials 40 --frac 0.3
 The study is stored in reports/optuna/<model>.db, so an interrupted run can simply be restarted.
 Objective: mean log-loss over CV folds (the HMM needs good probabilities, not just good ranking).
 Trial 0 is the untuned default configuration, so tuned-vs-untuned is compared on identical folds.
@@ -98,14 +98,11 @@ def main(name, trials, frac, cv_splits, exclude, test_frac, raw_root):
     ax.set_xlabel("trial"); ax.set_ylabel("CV log-loss"); ax.legend(); ax.set_title(f"Optuna history ({name})")
     pathlib.Path("reports/figures").mkdir(parents=True, exist_ok=True)
     fig.savefig(f"reports/figures/optuna_history_{name}.png", dpi=130, bbox_inches="tight")
-    try:
-        imp = optuna.importance.get_param_importances(study)
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.barh(list(imp)[::-1], list(imp.values())[::-1]); ax.set_xlabel("importance")
-        ax.set_title(f"Hyper-parameter importance ({name})")
-        fig.savefig(f"reports/figures/optuna_importance_{name}.png", dpi=130, bbox_inches="tight")
-    except Exception as e:
-        print("importance plot skipped:", e)
+    imp = optuna.importance.get_param_importances(study)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.barh(list(imp)[::-1], list(imp.values())[::-1]); ax.set_xlabel("importance")
+    ax.set_title(f"Hyper-parameter importance ({name})")
+    fig.savefig(f"reports/figures/optuna_importance_{name}.png", dpi=130, bbox_inches="tight")
 
 
 if __name__ == "__main__":
