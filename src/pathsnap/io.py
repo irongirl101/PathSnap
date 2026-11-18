@@ -2,7 +2,7 @@
 
 File formats (verified against the supplied archive):
 
-    .track  : TSV  lon  lat  point_index   (1-based sequential index; gaps possible)
+    .track  : TSV  lon  lat  timestamp_s   (seconds since trip start)
     .route  : TSV  edge_id                  (0-based arc/edge id; forms a connected path = reference route)
     .nodes  : TSV  lon  lat                 (row index == node id, 0-based)
     .arcs   : TSV  src  dst                 (node ids; directed graph)
@@ -22,7 +22,7 @@ import numpy as np
 @dataclass
 class Trip:
     trip_id: str
-    track: np.ndarray        # (P,3) [lon, lat, point_index]
+    track: np.ndarray        # (P,3) [lon, lat, timestamp_s]
     route: np.ndarray        # (R,) int64 reference edge ids (0-based arc ids)
     nodes: np.ndarray        # (N,2) [lon, lat]; row index == node id
     arcs: np.ndarray         # (M,2) int64 [src, dst] node ids

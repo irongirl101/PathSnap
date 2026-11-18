@@ -41,8 +41,14 @@ def configure_runtime(app: Any) -> None:
     app.state.project_root = root
     app.state.model_path = model_path
     app.state.model = load_artifact(model_path)
-    app.state.matcher = load_callable(os.getenv("PATHSNAP_MATCHER"), "PATHSNAP_MATCHER")
-    app.state.evaluator = load_callable(os.getenv("PATHSNAP_EVALUATOR"), "PATHSNAP_EVALUATOR")
+    app.state.matcher = load_callable(
+        os.getenv("PATHSNAP_MATCHER", "src.pathsnap.api_adapter:matcher"),
+        "PATHSNAP_MATCHER",
+    )
+    app.state.evaluator = load_callable(
+        os.getenv("PATHSNAP_EVALUATOR", "src.pathsnap.api_adapter:evaluate_trip"),
+        "PATHSNAP_EVALUATOR",
+    )
     app.state.evaluation_data_dir = Path(
         os.getenv("PATHSNAP_EVAL_DATA_DIR", root / "data" / "evaluator_test")
     )
