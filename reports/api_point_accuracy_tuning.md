@@ -35,3 +35,12 @@ coverage 1.000). This check did not feed back into the configuration.
 `src.pathsnap.api_adapter` now loads `config/default.yaml` when
 `PATHSNAP_CONFIG` is unset. Set that environment variable to use a different
 configuration file.
+
+## Version note
+
+The measurements above were collected before the latest `origin/main` merge,
+which changed feature extraction and the model wrapper. They document the
+selected HMM settings and their results on that earlier code version. The API
+integration suite passes on the merged code, but a fresh end-to-end evaluation
+of the full evaluator set did not finish in the local run; the earlier scores
+should therefore not be read as a verified 90% result for the merged version.
