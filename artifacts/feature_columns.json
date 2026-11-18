@@ -1,0 +1,39 @@
+{
+  "feature_columns": [
+    "dist",
+    "frac",
+    "arc_len",
+    "dist_rank",
+    "n_cands",
+    "dist_gap_best",
+    "dist_ratio_best",
+    "heading_diff",
+    "heading_cos",
+    "along_ratio",
+    "dist_p2",
+    "dist_p1",
+    "dist_n1",
+    "dist_n2",
+    "win_mean_dist",
+    "win_max_dist",
+    "conn_prev",
+    "conn_next",
+    "out_deg_end",
+    "step_prev",
+    "step_next",
+    "speed",
+    "accel",
+    "dt_prev"
+  ],
+  "categorical": [
+    "conn_prev",
+    "conn_next"
+  ],
+  "never_use_as_features": [
+    "trip_id",
+    "point_idx",
+    "arc_id",
+    "on_route",
+    "label"
+  ]
+}
