@@ -90,8 +90,14 @@ def _request_points(request: dict[str, Any]) -> list[tuple[float, float, int]]:
 
 def _load_config_from_env() -> MatchConfig:
     config_path = os.getenv("PATHSNAP_CONFIG")
-    if config_path and Path(config_path).is_file():
-        return load_config(config_path)
+    if config_path:
+        path = Path(config_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"PathSnap config file not found: {path}")
+        return load_config(str(path))
+    default_path = Path(__file__).resolve().parents[2] / "config" / "default.yaml"
+    if default_path.is_file():
+        return load_config(str(default_path))
     return MatchConfig()
 
 
