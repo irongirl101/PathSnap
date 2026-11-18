@@ -101,7 +101,7 @@ def _result_to_response(
     because the candidate schema snaps to edges, not nodes (the reference
     `.route` is an edge sequence, not per-point node labels).
     """
-    route_arc_ids: List[Any] = []
+    route_arc_ids: List[Any] = [int(e.edge_id) for e in result.stitched_route]
     points_out: List[Dict[str, Any]] = []
     total_distance_m = 0.0
 
@@ -109,7 +109,6 @@ def _result_to_response(
         cand = result.matched[i]
         lon, lat, _pidx = result.points[i]
         if cand is not None:
-            route_arc_ids.append(int(cand.edge_id))
             total_distance_m += float(cand.dist_m)
             points_out.append(
                 {
@@ -132,10 +131,6 @@ def _result_to_response(
                     "confidence": None,
                 }
             )
-
-    # Stitched route edge ids (deduped, direction-preserved).
-    if not route_arc_ids:
-        route_arc_ids = [int(e.edge_id) for e in result.stitched_route]
 
     return {
         "trip_id": trip_id,
