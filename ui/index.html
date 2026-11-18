@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PathSnap · GPS map matching</title>
+  <style>
+    :root { color-scheme: light; --ink:#17253a; --muted:#63738a; --line:#dce4ee; --blue:#245eea; --pale:#edf3ff; --bg:#f5f7fb; }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif }
+    header { background:#fff; border-bottom:1px solid var(--line); padding:18px max(24px,calc((100% - 1100px)/2)); display:flex; justify-content:space-between; align-items:center }
+    .brand { font-size:20px; font-weight:750; letter-spacing:-.04em }.brand span { color:var(--blue) }
+    .health { color:var(--muted); font-size:13px }.dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:#aab5c3; margin-right:7px }
+    main { max-width:1100px; margin:36px auto; padding:0 20px }
+    h1 { margin:0; font-size:30px; letter-spacing:-.04em } .intro { color:var(--muted); margin:7px 0 26px }
+    .grid { display:grid; grid-template-columns:minmax(320px,.9fr) minmax(380px,1.1fr); gap:18px; align-items:start }
+    .card { background:white; border:1px solid var(--line); border-radius:15px; padding:20px; box-shadow:0 5px 20px #152b4b08 }
+    h2 { margin:0 0 14px; font-size:16px } label { display:block; font-size:13px; font-weight:650; margin:13px 0 6px }
+    input,textarea { width:100%; border:1px solid var(--line); border-radius:9px; padding:10px 11px; color:var(--ink); font:inherit; background:#fff }
+    textarea { min-height:180px; resize:vertical; font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace }
+    button { border:0; border-radius:9px; padding:10px 15px; background:var(--blue); color:white; font:inherit; font-weight:650; cursor:pointer }
+    button.secondary { color:var(--blue); background:var(--pale) } button:disabled { opacity:.55; cursor:wait }
+    .actions { display:flex; gap:9px; margin-top:13px; flex-wrap:wrap }
+    .hint { font-size:12px; color:var(--muted); margin:10px 0 0 }
+    #map { width:100%; height:330px; background:radial-gradient(#d8e0eb 1px,transparent 1px),#f8faff; background-size:18px 18px; border:1px solid var(--line); border-radius:11px }
+    .legend { display:flex; gap:16px; font-size:12px; color:var(--muted); margin-top:9px }.swatch { width:18px; display:inline-block; border-top:3px solid; vertical-align:middle; margin-right:5px }.raw { border-color:#97a4b6 }.matched { border-color:var(--blue) }
+    #result { margin-top:16px; border-radius:10px; padding:12px; background:#f6f8fc; font-size:13px; overflow-wrap:anywhere; white-space:pre-wrap; max-height:210px; overflow:auto }
+    .evaluation { margin-top:18px } #metrics { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px }.metric { background:var(--pale); border-radius:9px; padding:9px 12px; min-width:100px }.metric b { display:block; font-size:16px }.metric span { font-size:11px; color:var(--muted) }
+    @media(max-width:800px) { main {margin:24px auto}.grid {grid-template-columns:1fr} header {padding:14px 20px} }
+  </style>
+</head>
+<body>
+  <header><div class="brand">Path<span>Snap</span></div><div class="health"><i class="dot" id="healthDot"></i><span id="healthText">Checking API…</span></div></header>
+  <main>
+    <h1>GPS trace map matching</h1>
+    <p class="intro">Submit an ordered GPS trace and inspect the predicted road arc sequence.</p>
+    <div class="grid">
+      <section class="card">
+        <h2>Trip input</h2>
+        <label for="tripId">Trip ID <span style="font-weight:400;color:#718096">(optional)</span></label>
+        <input id="tripId" placeholder="e.g. 00000042">
+        <label for="points">Ordered points (JSON)</label>
+        <textarea id="points" spellcheck="false">[
+  {"lat": 12.9716, "lon": 77.5946, "timestamp": "2025-01-01T10:00:00Z"},
+  {"lat": 12.9721, "lon": 77.5952, "timestamp": "2025-01-01T10:00:05Z"}
+]</textarea>
+        <div class="actions"><button id="matchBtn">Match route</button><button class="secondary" id="evalBtn">Evaluate held-out trips</button></div>
+        <p class="hint">The held-out route labels stay on the server. Evaluation uses the configured ten-trip manifest.</p>
+      </section>
+      <section class="card">
+        <h2>Trace and matched route</h2>
+        <svg id="map" viewBox="0 0 700 330" role="img" aria-label="GPS trace and matched route visualization"></svg>
+        <div class="legend"><span><i class="swatch raw"></i>GPS observations</span><span><i class="swatch matched"></i>Matched output points</span></div>
+        <div id="result" aria-live="polite">Enter a trace and choose “Match route”.</div>
+      </section>
+    </div>
+    <section class="card evaluation"><h2>Server-side evaluation</h2><div id="metrics" class="hint">No evaluation has been run.</div></section>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    const result = $('result');
+    async function api(path, body) {
+      const response = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
+      return data;
+    }
+    function draw(raw, matched=[]) {
+      const svg = $('map'); svg.replaceChildren();
+      const pts = [...raw, ...matched].filter(p => Number.isFinite(+p.lat) && Number.isFinite(+p.lon));
+      if (!pts.length) return;
+      const lats=pts.map(p=>+p.lat), lons=pts.map(p=>+p.lon);
+      const minLat=Math.min(...lats), maxLat=Math.max(...lats), minLon=Math.min(...lons), maxLon=Math.max(...lons);
+      const dx=maxLon-minLon || 0.0001, dy=maxLat-minLat || 0.0001;
+      const xy=p=>[35+((+p.lon-minLon)/dx)*630,295-((+p.lat-minLat)/dy)*260];
+      const poly=(arr,color,width)=>{ if(arr.length<2)return; const el=document.createElementNS('http://www.w3.org/2000/svg','polyline'); el.setAttribute('points',arr.map(p=>xy(p).join(',')).join(' ')); el.setAttribute('fill','none'); el.setAttribute('stroke',color); el.setAttribute('stroke-width',width); el.setAttribute('stroke-linecap','round'); el.setAttribute('stroke-linejoin','round'); svg.append(el); };
+      poly(raw,'#97a4b6',3); poly(matched,'#245eea',5);
+      for(const p of raw){const [x,y]=xy(p);const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('cx',x);c.setAttribute('cy',y);c.setAttribute('r',4);c.setAttribute('fill','#6d7d93');svg.append(c);}
+    }
+    async function checkHealth(){try{const r=await fetch('/healthz');const d=await r.json();$('healthDot').style.background=d.matcher_ready?'#22a06b':'#e4a11b';$('healthText').textContent=d.matcher_ready?'API ready':'API online · matcher not configured';}catch{$('healthText').textContent='API unavailable';$('healthDot').style.background='#dc4c4c';}}
+    $('matchBtn').onclick=async()=>{const btn=$('matchBtn');try{const points=JSON.parse($('points').value);draw(points);btn.disabled=true;result.textContent='Matching…';const data=await api('/api/v1/map-match',{trip_id:$('tripId').value||null,points});draw(points,data.points||[]);result.textContent=`Matched ${data.route_arc_ids.length} arcs\n${JSON.stringify(data.route_arc_ids)}\n\n${JSON.stringify(data.metadata||{},null,2)}`;}catch(e){result.textContent=e.message;}finally{btn.disabled=false;}};
+    $('evalBtn').onclick=async()=>{const btn=$('evalBtn');btn.disabled=true;$('metrics').textContent='Running evaluation on the server…';try{const data=await api('/api/v1/evaluate',{});$('metrics').replaceChildren();const add=(label,value)=>{const box=document.createElement('div');box.className='metric';const b=document.createElement('b'),s=document.createElement('span');b.textContent=value??'—';s.textContent=label;box.append(b,s);$('metrics').append(box);};add('trips',data.evaluated_trips);for(const [k,v] of Object.entries(data.metrics||{}))add(k,v); }catch(e){$('metrics').textContent=e.message;}finally{btn.disabled=false;}};
+    checkHealth();
+  </script>
+</body>
+</html>
