@@ -1,0 +1,11 @@
+model,split,tn,fp,fn,tp
+logreg,cv_oof,230101,6586,6586,26439
+logreg,student_test,27154,496,496,3151
+lgbm,cv_oof,230457,6230,6230,26795
+lgbm,student_test,27221,429,429,3218
+lgbm_ranker,cv_oof,230347,6340,6340,26685
+lgbm_ranker,student_test,27210,440,440,3207
+mlp,cv_oof,230453,6234,6234,26791
+mlp,student_test,27225,425,425,3222
+svm,cv_oof,229981,6706,6706,26319
+svm,student_test,27141,509,509,3138
