@@ -16,8 +16,8 @@ routing:
   min_route_gap_m: 50.0
 
 gap:
-  # Detect a gap when the point-index difference between consecutive
-  # observations exceeds this value (1 = no gap, since indices increment by 1).
+  # Detect a gap when elapsed seconds between observations exceed this value
+  # (1 = nominal 1 Hz sampling has no gap).
   index_gap_threshold: 1
   # Distance-based fallback gap threshold (metres). <= 0 disables.
   distance_gap_threshold_m: 500.0
