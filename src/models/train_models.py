@@ -1,6 +1,6 @@
 """Compare classifiers with trip-grouped CV on data/processed/candidates.parquet.
 
-usage: python -m src.models.train_models --exclude 00000054 [--frac 0.3] [--models logreg lgbm]
+usage: python -m src.models.train_models --exclude 00000054 [--frac 0.3] [--models logreg svm lgbm]
 Writes reports/results.csv (mean/std over folds), reports/results_per_fold.csv, reports/oof_predictions.parquet
 """
 import argparse, pathlib, time
@@ -10,6 +10,8 @@ from sklearn.model_selection import GroupKFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
+from sklearn.svm import LinearSVC
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
@@ -33,6 +35,13 @@ def get_models():
                                    random_state=SEED, verbose=-1),
         "mlp": make_pipeline(imp(), StandardScaler(),
                              MLPClassifier((64, 32), early_stopping=True, max_iter=60, random_state=SEED)),
+        "svm": make_pipeline(
+            imp(), StandardScaler(),
+            CalibratedClassifierCV(
+                LinearSVC(C=1.0, max_iter=5000, random_state=SEED),
+                method="sigmoid", cv=3,
+            ),
+        ),
     }
 
 
@@ -107,6 +116,6 @@ if __name__ == "__main__":
     ap.add_argument("--exclude", nargs="*", default=["00000054"])
     ap.add_argument("--frac", type=float, default=1.0, help="share of points to use (speeds up experiments)")
     ap.add_argument("--splits", type=int, default=5)
-    ap.add_argument("--models", nargs="*", default=["logreg", "rf", "lgbm", "mlp"])
+    ap.add_argument("--models", nargs="*", default=["logreg", "rf", "lgbm", "mlp", "svm"])
     a = ap.parse_args()
     main(a.path, a.exclude, a.frac, a.splits, a.models)
