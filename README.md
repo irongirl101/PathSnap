@@ -39,11 +39,11 @@ An arc ID belongs to one trip’s graph. When joining arcs to features or graph 
 
 The browser asks `GET /api/v1/trips` for the available trip IDs. When someone selects a trip, it sends that ID to `POST /api/v1/evaluate`. The API runs the matcher, compares its arc sequence with the reference route, and returns the prediction and metrics.
 
-The matcher and route-scoring functions still need to be connected to the team’s candidate, model, and HMM code. Until they’re configured, the evaluation endpoint reports that the pipeline isn’t ready; it won’t return placeholder predictions or metrics.
+The API loads the HMM matcher and route scorer from `src.pathsnap.api_adapter`. B’s training code is in the repository, and the adapter can use a fitted `artifacts/final_model.joblib` with A’s candidate features when that file is present. The current branch does not include a fitted model artifact, so predictions use the geometric candidate baseline for now. The health endpoint reports whether a model was loaded.
 
-The matcher is loaded from `PATHSNAP_MATCHER=package.module:function`. It receives a dictionary containing `trip_id`, ordered GPS points, nodes, and arcs, plus runtime state with the model artifact. It returns a `route_arc_ids` sequence and may include predicted points for the map preview.
+The matcher receives a dictionary containing `trip_id`, ordered GPS points, nodes, and arcs, plus runtime state with the optional model artifact. It returns a stitched `route_arc_ids` sequence and per-observation matches for the map preview. The model-backed path uses A’s feature generator and the loaded model’s `predict_proba` scores as HMM emissions. Override the default with `PATHSNAP_MATCHER=package.module:function` if the team changes the matcher adapter.
 
-The scorer is loaded from `PATHSNAP_EVALUATOR=package.module:function`. It receives the trip ID, predicted arc IDs, and reference arc IDs, and returns `{"metrics": {"metric_name": value}, "metadata": {}}`. The matcher never receives the reference sequence.
+The scorer receives the trip ID, predicted arc IDs, reference arc IDs, trip graph/trace data, and per-observation predictions. It returns RMF, edge precision/recall/F1, point accuracy, and coverage. The matcher never receives the reference sequence. You can override the scorer with `PATHSNAP_EVALUATOR=package.module:function` if the evaluation implementation changes.
 
 The API looks for `artifacts/final_model.joblib` at startup. Override that path if needed. It’s fine to start the API before the model artifact or adapters are ready; the health endpoint shows which pieces are configured.
 
@@ -52,10 +52,11 @@ The API looks for `artifacts/final_model.joblib` at startup. Override that path 
 | Variable | Default | What it controls |
 | --- | --- | --- |
 | `PATHSNAP_MODEL_PATH` | `artifacts/final_model.joblib` | Classifier artifact loaded at startup |
-| `PATHSNAP_MATCHER` | unset | `module:function` that predicts an arc sequence (e.g. `pathsnap.api_adapter:matcher`) |
-| `PATHSNAP_EVALUATOR` | unset | `module:function` that scores the predicted sequence |
+| `PATHSNAP_MATCHER` | `src.pathsnap.api_adapter:matcher` | `module:function` that predicts an arc sequence |
+| `PATHSNAP_EVALUATOR` | `src.pathsnap.api_adapter:evaluate_trip` | `module:function` that scores the predicted sequence |
 | `PATHSNAP_DATA_ROOT` | `<repo>/data` | Directory containing `train/` and `student_test/` trip folders |
 | `PATHSNAP_CONFIG` | unset | Path to a `MatchConfig` YAML file (default: `config/default.yaml`) |
+| `PATHSNAP_EVAL_DATA_DIR` | `data/evaluator_test` | Trip folders available in the evaluator UI |
 
 ## Member C — HMM map-matching component (`src/pathsnap/`)
 
@@ -110,9 +111,11 @@ results, limitations, and failure cases.
 
 ### API integration
 
-Set `PATHSNAP_MATCHER=pathsnap.api_adapter:matcher` to wire the matcher into
+Set `PATHSNAP_MATCHER=src.pathsnap.api_adapter:matcher` to wire the matcher into
 the FastAPI app. The adapter converts the API's `(lat, lon)` coordinate
-contract to internal `(lon, lat)` at the boundary.
+contract to internal `(lon, lat)` at the boundary. Set
+`PATHSNAP_EVALUATOR=src.pathsnap.api_adapter:evaluate_trip` to wire the
+evaluator into `/api/v1/evaluate`.
 
 ## Project folders
 

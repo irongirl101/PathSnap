@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from src.api.runtime import configure_runtime
+from src.api.runtime import configure_runtime, get_runtime
 from src.api.schemas import (
     EvaluationRequest,
     EvaluationResponse,
@@ -114,8 +114,6 @@ def evaluate(payload: EvaluationRequest, request: Request) -> dict[str, Any]:
         prediction = MapMatchResponse.model_validate(prediction_result)
         if prediction.trip_id not in (None, payload.trip_id):
             raise ValueError("Map matcher returned a different trip_id")
-        if not prediction.route_arc_ids:
-            raise ValueError("Map matcher returned an empty route_arc_ids sequence")
         known_arc_ids = {arc["arc_id"] for arc in trip_input.arcs}
         known_arc_ids_text = {str(arc_id) for arc_id in known_arc_ids}
         unknown_arc_ids = [
@@ -133,6 +131,8 @@ def evaluate(payload: EvaluationRequest, request: Request) -> dict[str, Any]:
             trip_id=payload.trip_id,
             predicted_arc_ids=prediction.route_arc_ids,
             reference_arc_ids=reference_arc_ids,
+            trip_data=trip_input.as_dict(),
+            prediction=prediction.model_dump(mode="json"),
         )
         elapsed_ms = round((perf_counter() - started) * 1000, 2)
         if not isinstance(evaluation, dict):

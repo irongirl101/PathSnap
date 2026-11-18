@@ -34,11 +34,11 @@ class RoutingConfig:
 class GapConfig:
     """GPS-gap detection settings.
 
-    The .track third column is a sequential point index (not a timestamp), so
-    gaps are detected from index discontinuities, with a distance-based fallback.
+    The .track third column is elapsed time in seconds. Gaps are detected from
+    elapsed-time discontinuities, with a distance-based fallback.
     """
-    # Detect a gap when the point-index difference between consecutive
-    # observations exceeds this value (1 = no gap).
+    # Detect a gap when elapsed seconds between observations exceed this value
+    # (1 = nominal 1 Hz sampling has no gap).
     index_gap_threshold: int = 1
     # Distance-based fallback: detect a gap when great-circle distance between
     # consecutive GPS observations exceeds this (metres). Set <= 0 to disable.
